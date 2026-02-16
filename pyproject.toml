@@ -1,0 +1,35 @@
+[project]
+name = "threat-modeling-mcp-server"
+version = "0.1.0"
+description = "A Model Context Protocol (MCP) server for threat modeling"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "mcp[cli]>=1.6.0",
+    "pydantic>=2.10.6",
+    "loguru>=0.7.0",
+]
+license = {text = "Apache-2.0"}
+
+classifiers = [
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+[project.scripts]
+"threat-modeling-mcp-server" = "threat_modeling_mcp_server.server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["threat_modeling_mcp_server"]

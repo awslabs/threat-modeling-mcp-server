@@ -9,6 +9,7 @@ A Model Context Protocol (MCP) server for comprehensive threat modeling with aut
 - [Key Features](#key-features)
 - [Prerequisites](#prerequisites)
 - [Installation](#installation)
+- [Running with Kiro CLI](#running-with-kiro-cli)
 - [Output File Management](#output-file-management)
 - [Quick Reference](#quick-reference)
 - [Tools Overview](#tools-overview)
@@ -199,6 +200,16 @@ Add the following to your MCP client configuration:
   }
 }
 ```
+
+### Running with Kiro CLI
+
+To run the MCP server via `kiro-cli` with all tools auto-approved:
+
+```bash
+kiro-cli chat --trust-tools="@threat-modeling-mcp-server/*"
+```
+
+This trusts all tools from the `threat-modeling-mcp-server` MCP server, so you won't be prompted to approve each tool call individually.
 
 ## Output File Management
 

@@ -24,6 +24,15 @@ classifiers = [
 [project.scripts]
 "threat-modeling-mcp-server" = "threat_modeling_mcp_server.server:main"
 
+[dependency-groups]
+dev = [
+    "pytest>=9.0.0",
+    "pytest-asyncio>=0.25.0",
+    "pytest-cov>=7.0.0",
+    "anyio>=4.0.0",
+    "typeguard>=4.0.0",
+]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

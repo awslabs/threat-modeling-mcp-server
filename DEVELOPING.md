@@ -8,22 +8,34 @@
 ## Setup
 
 1. Clone the repository
-2. Install development dependencies:
-   ```bash
-   uv pip install -e .
-   ```
+2. Install all dependencies (including dev/test dependencies):
+
+```bash
+uv sync
+```
+
+This installs the project plus the `dev` dependency group defined in `pyproject.toml` (pytest, pytest-asyncio, etc.) into a `.venv` managed by uv.
+
+If your environment gets into a bad state, you can recreate it:
+
+```bash
+rm -rf .venv
+uv sync
+```
 
 ## Running the Server Locally
 
 ```bash
-python run_server.py
+uv run run_server.py
 ```
 
 ## Running Tests
 
 ```bash
-python -m pytest
+uv run pytest
 ```
+
+You don't need to run `uv sync` first — `uv run` will sync automatically if needed.
 
 ## Project Structure
 

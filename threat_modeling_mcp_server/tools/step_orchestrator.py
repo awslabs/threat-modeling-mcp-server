@@ -536,7 +536,7 @@ Generate final documentation and outputs for integration with development proces
    - Create verification criteria for each mitigation
 
 ## Tools to Use
-- `export_comprehensive_threat_model(output_path)`: Export complete threat model with all global variables to JSON
+- `export_comprehensive_threat_model(output_path)`: Export complete threat model with all global variables to Threat Composer JSON format (.tc.json)
 - `export_threat_model_with_remediation_status(output_path)`: Export with code validation results
 - `get_threat_model_progress()`: Get progress metrics and completion status
 - `list_assumptions()`: Get all documented assumptions

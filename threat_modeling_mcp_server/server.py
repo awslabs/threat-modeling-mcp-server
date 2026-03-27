@@ -158,7 +158,7 @@ SERVER_INSTRUCTIONS = """
     - `delete_mitigation`: Delete a mitigation from the model
     - `link_mitigation_to_threat`: Link a mitigation to a threat
     - `unlink_mitigation_from_threat`: Unlink a mitigation from a threat
-    - `export_comprehensive_threat_model`: Export comprehensive threat model with all global variables to both JSON and Markdown formats
+    - `export_comprehensive_threat_model`: Export comprehensive threat model with all global variables to both Threat Composer JSON format (.tc.json) and Markdown formats
     
     ### Data Model Types
     - `get_data_model_types`: Get available types for a data model

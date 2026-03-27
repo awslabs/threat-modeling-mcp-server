@@ -1,7 +1,6 @@
 *.pyc
 __pycache__
 .DS_Store
-uv.lock
 .kiro/
 .hypothesis/
 .venv/

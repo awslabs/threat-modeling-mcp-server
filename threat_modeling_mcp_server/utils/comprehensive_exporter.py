@@ -85,6 +85,18 @@ def convert_assumptions_to_threat_composer_format(assumptions: Dict[str, Any]) -
     return result
 
 
+def _truncate(value: str, max_length: int) -> str:
+    """Truncate a string to max_length, preserving whole words where possible."""
+    if not value or len(value) <= max_length:
+        return value
+    # Try to break at last space before the limit
+    truncated = value[:max_length]
+    last_space = truncated.rfind(' ')
+    if last_space > max_length * 0.6:
+        return truncated[:last_space]
+    return truncated
+
+
 def convert_threats_to_threat_composer_format(threats: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Convert threats to Threat Composer format.
     
@@ -100,20 +112,30 @@ def convert_threats_to_threat_composer_format(threats: Dict[str, Any]) -> List[D
         # Use our internal status directly (now compatible with Threat Composer)
         threat_status = threat.status.value if threat.status else "threatIdentified"
         
+        # Enforce Threat Composer schema maxLength constraints
+        threat_source = _truncate(threat.threatSource, 200)
+        prerequisites = _truncate(threat.prerequisites, 200)
+        threat_action = _truncate(threat.threatAction, 200)
+        threat_impact = _truncate(threat.threatImpact, 200)
+        statement = _truncate(threat.statement, 1400)
+        impacted_goal = [_truncate(g, 200) for g in (threat.impactedGoal or [])]
+        impacted_assets = [_truncate(a, 200) for a in (threat.impactedAssets or [])]
+        tags = [_truncate(t, 30) for t in (threat.tags or [])]
+        
         # Use only fields that are compatible with Threat Composer
         threat_dict = {
             "id": threat.id,
             "numericId": threat.numericId,
-            "threatSource": threat.threatSource,
-            "prerequisites": threat.prerequisites,
-            "threatAction": threat.threatAction,
-            "threatImpact": threat.threatImpact,
-            "impactedGoal": threat.impactedGoal,
-            "impactedAssets": threat.impactedAssets,
-            "statement": threat.statement,
+            "threatSource": threat_source,
+            "prerequisites": prerequisites,
+            "threatAction": threat_action,
+            "threatImpact": threat_impact,
+            "impactedGoal": impacted_goal,
+            "impactedAssets": impacted_assets,
+            "statement": statement,
             "displayOrder": threat.displayOrder,
             "status": threat_status,
-            "tags": threat.tags,
+            "tags": tags,
             "metadata": []  # Keep metadata empty for Threat Composer compatibility
         }
         

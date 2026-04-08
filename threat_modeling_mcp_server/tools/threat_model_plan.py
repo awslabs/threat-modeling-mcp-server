@@ -655,7 +655,7 @@ FOR EVERY AWS SERVICE OR SECURITY RECOMMENDATION:
 
 #### Step 9.2: Export Comprehensive Threat Model
 **Tool:** `export_comprehensive_threat_model(output_path)`
-- Export complete threat model with all global variables to JSON format
+- Export complete threat model with all global variables to Threat Composer JSON format (.tc.json)
 - Include all components, threats, mitigations, business context, assumptions, and phase progress
 - Compatible with AWS Threat Composer and includes extended data
 

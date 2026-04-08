@@ -28,6 +28,21 @@ threat_counter = 1
 mitigation_counter = 1
 
 
+THREAT_COMPOSER_MAX_LENGTH = 200
+STATEMENT_MAX_LENGTH = 1400
+
+
+def _truncate_field(value: str, max_length: int = THREAT_COMPOSER_MAX_LENGTH) -> str:
+    """Truncate a string to max_length for Threat Composer schema compliance."""
+    if not value or len(value) <= max_length:
+        return value
+    truncated = value[:max_length]
+    last_space = truncated.rfind(' ')
+    if last_space > max_length * 0.6:
+        return truncated[:last_space]
+    return truncated
+
+
 async def add_threat_impl(
     ctx: Context,
     threat_source: str,
@@ -46,11 +61,18 @@ async def add_threat_impl(
     
     logger.debug(f'Adding threat: {threat_source} {threat_action}')
     
+    # Enforce Threat Composer schema maxLength constraints
+    threat_source = _truncate_field(threat_source)
+    prerequisites = _truncate_field(prerequisites)
+    threat_action = _truncate_field(threat_action)
+    threat_impact = _truncate_field(threat_impact)
+    
     # Generate ID
     threat_id = str(uuid4())
     
     # Create statement from components
     statement = f"A {threat_source} {prerequisites} can {threat_action}, which leads to {threat_impact}"
+    statement = _truncate_field(statement, STATEMENT_MAX_LENGTH)
     
     # Create threat
     threat = Threat(
@@ -104,20 +126,23 @@ async def update_threat_impl(
     
     # Update the threat fields
     if threat_source is not None:
-        threat.threatSource = threat_source
+        threat.threatSource = _truncate_field(threat_source)
     
     if prerequisites is not None:
-        threat.prerequisites = prerequisites
+        threat.prerequisites = _truncate_field(prerequisites)
     
     if threat_action is not None:
-        threat.threatAction = threat_action
+        threat.threatAction = _truncate_field(threat_action)
     
     if threat_impact is not None:
-        threat.threatImpact = threat_impact
+        threat.threatImpact = _truncate_field(threat_impact)
     
     # Update the statement if any of the components changed
     if threat_source is not None or prerequisites is not None or threat_action is not None or threat_impact is not None:
-        threat.statement = f"A {threat.threatSource} {threat.prerequisites} can {threat.threatAction}, which leads to {threat.threatImpact}"
+        threat.statement = _truncate_field(
+            f"A {threat.threatSource} {threat.prerequisites} can {threat.threatAction}, which leads to {threat.threatImpact}",
+            STATEMENT_MAX_LENGTH
+        )
     
     if category is not None:
         threat.category = ThreatCategory(category)
@@ -643,13 +668,14 @@ def register_tools(mcp):
         """Add a new threat to the model.
 
         This tool adds a new threat to the threat model.
+        IMPORTANT: Each text field must be 200 characters or fewer to comply with the Threat Composer schema.
 
         Args:
             ctx: MCP context for logging and error handling
-            threat_source: Source of the threat (e.g., 'external attacker')
-            prerequisites: Prerequisites for the threat (e.g., 'with access to the network')
-            threat_action: Action performed by the threat (e.g., 'intercept unencrypted data')
-            threat_impact: Impact of the threat (e.g., 'exposure of sensitive data')
+            threat_source: Source of the threat, max 200 chars (e.g., 'external attacker')
+            prerequisites: Prerequisites for the threat, max 200 chars (e.g., 'with access to the network')
+            threat_action: Action performed by the threat, max 200 chars (e.g., 'intercept unencrypted data')
+            threat_impact: Impact of the threat, max 200 chars (e.g., 'exposure of sensitive data')
             category: STRIDE category of the threat
             severity: Severity of the threat
             likelihood: Likelihood of the threat
@@ -724,14 +750,15 @@ def register_tools(mcp):
         """Update an existing threat.
 
         This tool updates an existing threat in the threat model.
+        IMPORTANT: Each text field must be 200 characters or fewer to comply with the Threat Composer schema.
 
         Args:
             ctx: MCP context for logging and error handling
             id: ID of the threat to update
-            threat_source: New source of the threat
-            prerequisites: New prerequisites for the threat
-            threat_action: New action performed by the threat
-            threat_impact: New impact of the threat
+            threat_source: New source of the threat, max 200 chars
+            prerequisites: New prerequisites for the threat, max 200 chars
+            threat_action: New action performed by the threat, max 200 chars
+            threat_impact: New impact of the threat, max 200 chars
             category: New STRIDE category of the threat
             severity: New severity of the threat
             likelihood: New likelihood of the threat

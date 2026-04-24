@@ -1,0 +1,46 @@
+{
+  "name": "threat-modeler",
+  "description": "Specialized agent for systematic threat modeling using STRIDE methodology. Conducts 9-phase security analysis with automatic code validation and Threat Composer export.",
+  "prompt": "file://../prompts/threat-modeler.md",
+  "mcpServers": {
+    "threat-modeling-mcp-server": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/awslabs/threat-modeling-mcp-server.git",
+        "threat-modeling-mcp-server"
+      ],
+      "env": {
+        "FASTMCP_LOG_LEVEL": "ERROR"
+      },
+      "timeout": 120000
+    },
+    "aws-documentation-mcp-server": {
+      "command": "uvx",
+      "args": [
+        "awslabs.aws-documentation-mcp-server@latest"
+      ],
+      "env": {
+        "FASTMCP_LOG_LEVEL": "ERROR"
+      },
+      "timeout": 120000
+    }
+  },
+  "tools": [
+    "read",
+    "shell",
+    "@threat-modeling-mcp-server",
+    "@aws-documentation-mcp-server"
+  ],
+  "allowedTools": [
+    "read",
+    "@threat-modeling-mcp-server",
+    "@aws-documentation-mcp-server"
+  ],
+  "resources": [
+    "file://../../README.md",
+    "skill://../skills/**/SKILL.md"
+  ],
+  "model": "claude-sonnet-4.6",
+  "welcomeMessage": "Threat Modeling Agent ready. Say \"threat model this project\" to begin a full 9-phase STRIDE analysis, or ask about a specific phase."
+}

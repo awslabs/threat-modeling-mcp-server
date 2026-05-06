@@ -34,7 +34,7 @@ This plan provides a structured approach for detecting trust boundaries from arc
 ### Step 1: Gather Architecture Data
 First, collect all architecture information using the following tools:
 
-1. **Get Components**: Use `list_components()` to retrieve all system components
+1. **Get Components**: Use `tm_list_components()` to retrieve all system components
 2. **Get Connections**: Use `list_connections()` to retrieve all connections between components
 3. **Get Data Stores**: Use `list_data_stores()` to retrieve all data stores
 
@@ -45,7 +45,7 @@ Use the following prompt structure with an LLM to detect trust zones:
 You are a cybersecurity expert analyzing system architecture to detect trust zones for threat modeling.
 
 ARCHITECTURE DATA:
-[Insert the output from list_components(), list_connections(), and list_data_stores() here]
+[Insert the output from tm_list_components(), list_connections(), and list_data_stores() here]
 
 ANALYSIS INSTRUCTIONS:
 Analyze the architecture and identify logical trust zones based on:
@@ -301,7 +301,7 @@ Use the validation guidance and manual tools to refine the detection results as 
 
 ## Tools and Resources
 
-- **Architecture Tools**: list_components, list_connections, list_data_stores
+- **Architecture Tools**: tm_list_components, list_connections, list_data_stores
 - **Trust Boundary Tools**: add_trust_zone, add_crossing_point, add_trust_boundary
 - **AWS Documentation**: AWS Documentation MCP Server for validation
 - **Security Frameworks**: NIST Cybersecurity Framework, OWASP, industry standards

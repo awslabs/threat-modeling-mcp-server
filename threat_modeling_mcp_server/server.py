@@ -77,7 +77,7 @@ SERVER_INSTRUCTIONS = """
     ### Architecture Analysis
     - `add_component`: Add a new component to the architecture
     - `update_component`: Update an existing component
-    - `list_components`: List all components
+    - `tm_list_components`: List all components
     - `delete_component`: Delete a component
     - `add_connection`: Add a new connection between components
     - `update_connection`: Update an existing connection

@@ -616,7 +616,7 @@ This plan provides a structured approach for analyzing system architecture for s
 ### Step 1: Gather Architecture Data
 First, collect all architecture components using the following tools:
 
-1. **Get Components**: Use `list_components()` to retrieve all system components
+1. **Get Components**: Use `tm_list_components()` to retrieve all system components
 2. **Get Connections**: Use `list_connections()` to retrieve all component connections  
 3. **Get Data Stores**: Use `list_data_stores()` to retrieve all data storage elements
 
@@ -627,7 +627,7 @@ Use the following prompt structure with an LLM to analyze the architecture:
 You are a cybersecurity expert analyzing a system architecture for security concerns. 
 
 ARCHITECTURE DATA:
-[Insert the output from list_components(), list_connections(), and list_data_stores() here]
+[Insert the output from tm_list_components(), list_connections(), and list_data_stores() here]
 
 ANALYSIS INSTRUCTIONS:
 1. **Component Security Analysis**:
@@ -757,7 +757,7 @@ Combine the LLM analysis with AWS documentation validation to produce a comprehe
 
 ## Tools and Resources
 
-- **Architecture Tools**: list_components, list_connections, list_data_stores
+- **Architecture Tools**: tm_list_components, list_connections, list_data_stores
 - **AWS Documentation**: AWS Documentation MCP Server for validation
 - **Analysis Framework**: STRIDE, OWASP, NIST Cybersecurity Framework
 - **Compliance Standards**: SOC 2, ISO 27001, PCI DSS, GDPR (as applicable)
@@ -881,7 +881,7 @@ def register_tools(mcp):
             update_component_impl, "component"
         )
 
-    @mcp.tool()
+    @mcp.tool(name="tm_list_components")
     async def list_components(
         ctx: Context,
         type: Optional[str] = Field(default=None, description="Optional type to filter components"),

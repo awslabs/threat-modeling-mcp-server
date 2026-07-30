@@ -6,7 +6,7 @@ including detailed guidance for each phase and automated execution of certain st
 
 from typing import Dict, List, Optional, Any
 from loguru import logger
-from mcp.server.fastmcp import Context
+from mcp.server.mcpserver import Context
 from .threat_model_plan import detect_code_in_directory
 
 # Phase status tracking

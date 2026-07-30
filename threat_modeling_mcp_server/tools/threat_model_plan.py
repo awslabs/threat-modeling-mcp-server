@@ -4,7 +4,7 @@ import os
 import glob
 from typing import Dict, List, Optional
 from loguru import logger
-from mcp.server.fastmcp import Context
+from mcp.server.mcpserver import Context
 
 async def detect_code_in_directory(directory: str, file_patterns: Optional[List[str]] = None) -> bool:
     """Detect if code files are present in the specified directory.

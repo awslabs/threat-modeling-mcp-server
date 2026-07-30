@@ -45,7 +45,7 @@ TOOL_MODULES = [
 
 # Set up logging
 logger.remove()
-logger.add(sys.stderr, level=os.getenv('FASTMCP_LOG_LEVEL', 'WARNING'))
+logger.add(sys.stderr, level=os.getenv('MCPSERVER_LOG_LEVEL', 'WARNING'))
 
 # Server instructions
 SERVER_INSTRUCTIONS = """

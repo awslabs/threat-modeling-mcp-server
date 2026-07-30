@@ -11,7 +11,7 @@
         "threat-modeling-mcp-server"
       ],
       "env": {
-        "FASTMCP_LOG_LEVEL": "ERROR"
+        "MCPSERVER_LOG_LEVEL": "ERROR"
       },
       "timeout": 120000
     },
@@ -21,7 +21,7 @@
         "awslabs.aws-documentation-mcp-server@latest"
       ],
       "env": {
-        "FASTMCP_LOG_LEVEL": "ERROR"
+        "MCPSERVER_LOG_LEVEL": "ERROR"
       },
       "timeout": 120000
     }

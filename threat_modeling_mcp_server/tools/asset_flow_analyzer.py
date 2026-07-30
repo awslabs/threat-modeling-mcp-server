@@ -2,7 +2,7 @@
 
 from typing import Dict, List, Optional, Any
 from loguru import logger
-from mcp.server.fastmcp import Context
+from mcp.server.mcpserver import Context
 
 from threat_modeling_mcp_server.models.asset_flow_models import (
     Asset, AssetFlow, AssetType, AssetClassification, 

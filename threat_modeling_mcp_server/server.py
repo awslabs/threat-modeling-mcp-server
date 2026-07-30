@@ -7,7 +7,7 @@ It registers all threat modeling tools and runs the server.
 import sys
 import os
 from loguru import logger
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 # Import modules
 import threat_modeling_mcp_server.tools.threat_model_plan as threat_model_plan
@@ -196,7 +196,7 @@ SERVER_INSTRUCTIONS = """
 SERVER_DEPENDENCIES = ['pydantic']
 
 
-def validate_server_instructions(mcp: FastMCP) -> bool:
+def validate_server_instructions(mcp: MCPServer) -> bool:
     """Validate that all tools are properly documented in instructions.
     
     Args:
@@ -226,7 +226,7 @@ def validate_server_instructions(mcp: FastMCP) -> bool:
 
 
 # Create MCP server instance
-mcp: FastMCP = FastMCP(
+mcp: MCPServer = MCPServer(
     'threat-modeling-mcp-server',
     instructions=SERVER_INSTRUCTIONS,
     dependencies=SERVER_DEPENDENCIES,

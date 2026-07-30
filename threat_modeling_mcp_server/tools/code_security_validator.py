@@ -9,7 +9,7 @@ import os
 import json
 from typing import Dict, List, Set, Optional, Tuple, Any
 from loguru import logger
-from mcp.server.fastmcp import Context
+from mcp.server.mcpserver import Context
 
 from threat_modeling_mcp_server.models.threat_models import Threat, Mitigation
 from threat_modeling_mcp_server.models.code_validation_models import (

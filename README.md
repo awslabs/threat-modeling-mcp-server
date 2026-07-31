@@ -96,7 +96,7 @@ Running it on a subfolder will limit the scope of threat model and code to that 
 "Add a mitigation for input validation"
 
 # Export results
-"Export the threat model to my_model.json"
+"Export the threat model to my_model.tc.json"
 ```
 
 ## Key Features

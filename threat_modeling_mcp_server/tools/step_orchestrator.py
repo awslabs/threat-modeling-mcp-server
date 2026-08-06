@@ -636,7 +636,7 @@ The comprehensive threat model file has been generated in the `.threatmodel` dir
         return error_msg
 
 
-def get_current_phase_status() -> Dict[str, Any]:
+def _compute_current_phase_status() -> Dict[str, Any]:
     """Get the current phase status and completion progress.
     
     Returns:
@@ -903,7 +903,7 @@ After completing Phase 7, proceed to Phase 7.5:
             A dictionary with current phase information and completion percentages
         """
         logger.info("Getting current phase status")
-        return get_current_phase_status()
+        return _compute_current_phase_status()
     
     @mcp.tool()
     async def follow_threat_modeling_plan(ctx: Context, phase: str = None) -> str:

@@ -308,13 +308,18 @@ def export_comprehensive_threat_model(output_path: str, include_extended_data: b
     # Remove any existing extension to create base path
     base_path = os.path.splitext(normalized_path)[0]
     
+    # Strip a trailing ".tc" so a caller-supplied ".tc.json" path does not
+    # produce ".tc.tc.json"
+    if base_path.endswith('.tc'):
+        base_path = base_path[:-len('.tc')]
+    
     # Create the .threatmodel directory if it doesn't exist
     threatmodel_dir = os.path.join(os.path.dirname(base_path), '.threatmodel')
     os.makedirs(threatmodel_dir, exist_ok=True)
     
     # Create paths for both formats
     base_filename = os.path.basename(base_path)
-    json_path = os.path.join(threatmodel_dir, f"{base_filename}.json")
+    json_path = os.path.join(threatmodel_dir, f"{base_filename}.tc.json")
     markdown_path = os.path.join(threatmodel_dir, f"{base_filename}.md")
     
     # Export JSON format

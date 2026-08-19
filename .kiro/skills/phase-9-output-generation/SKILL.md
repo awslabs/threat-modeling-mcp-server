@@ -19,7 +19,7 @@ Generate final deliverables: Threat Composer-compatible JSON export and human-re
 ### export_comprehensive_threat_model(output_path)
 Manual export with custom filename.
 - `output_path`: Base filename (extensions added automatically)
-- Generates BOTH `.json` and `.md` files
+- Generates BOTH `.tc.json` and `.md` files
 - JSON is Threat Composer compatible (schema version 1)
 
 ### export_threat_model_with_remediation_status(output_path)
@@ -33,7 +33,7 @@ Export including code validation results (use after Phase 7.5).
 
 ### JSON Export (Threat Composer Compatible)
 ```
-.threatmodel/comprehensive_threat_model_YYYYMMDD_HHMMSS.json
+.threatmodel/comprehensive_threat_model_YYYYMMDD_HHMMSS.tc.json
 ```
 
 **Schema** (version 1):
@@ -89,7 +89,7 @@ Contains:
 ## Importing to AWS Threat Composer
 1. Open AWS Threat Composer
 2. Click Import
-3. Select the `.json` file from `.threatmodel/`
+3. Select the `.tc.json` file from `.threatmodel/`
 4. All threats, mitigations, assumptions, and links will load
 
 ## Workflow

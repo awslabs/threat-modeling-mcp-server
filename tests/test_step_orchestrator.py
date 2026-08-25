@@ -1,13 +1,13 @@
 """Unit tests for the step orchestrator module."""
 
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from threat_modeling_mcp_server.tools.step_orchestrator import (
     PHASES,
     phase_completion,
     get_phase_guidance,
-    get_current_phase_status,
+    get_current_phase_status_impl,
     detect_phase_completion,
     get_current_phase_auto,
 )
@@ -62,7 +62,7 @@ class TestGetPhaseGuidance:
         """Test that phase 1 guidance contains tools to use."""
         guidance = get_phase_guidance(1)
         assert "Tools to Use" in guidance
-        assert "set_business_context" in guidance
+        assert "manage_system_context" in guidance
 
     def test_phase_1_guidance_contains_next_steps(self):
         """Test that phase 1 guidance contains next steps."""
@@ -92,7 +92,7 @@ class TestGetPhaseGuidance:
         """Test that phase 7.5 guidance contains code validation info."""
         guidance = get_phase_guidance(7.5)
         assert "Code Validation" in guidance
-        assert "validate_security_controls" in guidance
+        assert "manage_code_validation" in guidance
 
     def test_phase_9_guidance_contains_export_info(self):
         """Test that phase 9 guidance contains export information."""
@@ -107,42 +107,58 @@ class TestGetPhaseGuidance:
 
 
 class TestGetCurrentPhaseStatus:
-    """Tests for get_current_phase_status function."""
+    """Tests for get_current_phase_status_impl function."""
 
     def test_status_contains_current_phase(self):
         """Test that status contains current phase information."""
-        status = get_current_phase_status()
+        status = get_current_phase_status_impl()
         assert "current_phase" in status
         assert "current_phase_name" in status
 
     def test_status_contains_completion_info(self):
         """Test that status contains completion information."""
-        status = get_current_phase_status()
+        status = get_current_phase_status_impl()
         assert "current_phase_completion" in status
         assert "overall_completion" in status
 
     def test_status_contains_phases_dict(self):
         """Test that status contains phases dictionary."""
-        status = get_current_phase_status()
+        status = get_current_phase_status_impl()
         assert "phases" in status
         assert isinstance(status["phases"], dict)
 
     def test_phases_in_status_have_name_and_completion(self):
         """Test that each phase in status has name and completion."""
-        status = get_current_phase_status()
+        status = get_current_phase_status_impl()
         for phase_num, phase_info in status["phases"].items():
             assert "name" in phase_info
             assert "completion" in phase_info
 
-    def test_initial_overall_completion_is_low(self):
-        """Test that initial overall completion is low (0.0 to 0.1)."""
-        status = get_current_phase_status()
-        # Note: phase_completion may have some initial values from state detection
+    def test_initial_overall_completion_is_low(self, empty_threat_model_state):
+        """Overall completion is low when no work has been recorded.
+
+        The empty_threat_model_state fixture clears the tool stores first:
+        several modules seed a default library on import (assets, threat actors,
+        trust zones), and phases 3, 4 and 5 are detected purely from those stores
+        being non-empty. Without the fixture this test passes or fails according
+        to which other test modules pytest imported first.
+        """
+        status = get_current_phase_status_impl()
         assert status["overall_completion"] <= 0.2
 
 
 class TestGetCurrentPhaseAuto:
-    """Tests for get_current_phase_auto function."""
+    """Tests for get_current_phase_auto function.
+
+    detect_phase_completion() is stubbed out: it derives completion from real
+    state (and resets phases that are no longer complete), which would override
+    the phase_completion values these tests set up deliberately.
+    """
+
+    @pytest.fixture(autouse=True)
+    def no_detection(self):
+        with patch('threat_modeling_mcp_server.tools.step_orchestrator.detect_phase_completion'):
+            yield
 
     def test_returns_first_phase_when_all_incomplete(self):
         """Test that function returns phase 1 when all phases are incomplete."""
@@ -189,14 +205,20 @@ class TestDetectPhaseCompletion:
         mock_get_state.return_value = {
             'business_context': {
                 'has_description': True,
-                'features_set': 6,
+                'features_set': 11,
+                'features_total': 11,
+                'is_complete': True,
             },
             'assumptions': 0,
             'architecture': {'components': 0, 'connections': 0, 'data_stores': 0},
             'threat_actors': 0,
-            'trust_boundaries': {'trust_zones': 0, 'crossing_points': 0, 'trust_boundaries': 0},
+            'reviewed_threat_actors': 0,
+            'trust_boundaries': {
+                'trust_zones': 0,
+                'crossing_points': 0, 'trust_boundaries': 0,
+            },
             'asset_flows': {'assets': 0, 'flows': 0},
-            'threats_mitigations': {'threats': 0, 'mitigations': 0, 'assumption_links': 0, 'mitigation_links': 0},
+            'threats_mitigations': {'threats': 0, 'mitigations': 0, 'mitigation_links': 0},
             'progress': {'current_phase': 1, 'current_phase_name': 'Test', 'overall_completion': 0.0}
         }
         detect_phase_completion()
@@ -206,13 +228,18 @@ class TestDetectPhaseCompletion:
     def test_phase_2_complete_when_components_exist(self, mock_get_state):
         """Test that phase 2 is marked complete when components exist."""
         mock_get_state.return_value = {
-            'business_context': {'has_description': False, 'features_set': 0},
+            'business_context': {'has_description': False, 'features_set': 0,
+                                 'features_total': 11, 'is_complete': False},
             'assumptions': 0,
             'architecture': {'components': 3, 'connections': 2, 'data_stores': 1},
             'threat_actors': 0,
-            'trust_boundaries': {'trust_zones': 0, 'crossing_points': 0, 'trust_boundaries': 0},
+            'reviewed_threat_actors': 0,
+            'trust_boundaries': {
+                'trust_zones': 0,
+                'crossing_points': 0, 'trust_boundaries': 0,
+            },
             'asset_flows': {'assets': 0, 'flows': 0},
-            'threats_mitigations': {'threats': 0, 'mitigations': 0, 'assumption_links': 0, 'mitigation_links': 0},
+            'threats_mitigations': {'threats': 0, 'mitigations': 0, 'mitigation_links': 0},
             'progress': {'current_phase': 1, 'current_phase_name': 'Test', 'overall_completion': 0.0}
         }
         detect_phase_completion()
@@ -222,13 +249,18 @@ class TestDetectPhaseCompletion:
     def test_phase_6_complete_when_threats_exist(self, mock_get_state):
         """Test that phase 6 is marked complete when threats exist."""
         mock_get_state.return_value = {
-            'business_context': {'has_description': False, 'features_set': 0},
+            'business_context': {'has_description': False, 'features_set': 0,
+                                 'features_total': 11, 'is_complete': False},
             'assumptions': 0,
             'architecture': {'components': 0, 'connections': 0, 'data_stores': 0},
             'threat_actors': 0,
-            'trust_boundaries': {'trust_zones': 0, 'crossing_points': 0, 'trust_boundaries': 0},
+            'reviewed_threat_actors': 0,
+            'trust_boundaries': {
+                'trust_zones': 0,
+                'crossing_points': 0, 'trust_boundaries': 0,
+            },
             'asset_flows': {'assets': 0, 'flows': 0},
-            'threats_mitigations': {'threats': 5, 'mitigations': 0, 'assumption_links': 0, 'mitigation_links': 0},
+            'threats_mitigations': {'threats': 5, 'mitigations': 0, 'mitigation_links': 0},
             'progress': {'current_phase': 1, 'current_phase_name': 'Test', 'overall_completion': 0.0}
         }
         detect_phase_completion()
@@ -238,13 +270,18 @@ class TestDetectPhaseCompletion:
     def test_phase_7_complete_when_mitigations_linked(self, mock_get_state):
         """Test that phase 7 is marked complete when mitigations are linked."""
         mock_get_state.return_value = {
-            'business_context': {'has_description': False, 'features_set': 0},
+            'business_context': {'has_description': False, 'features_set': 0,
+                                 'features_total': 11, 'is_complete': False},
             'assumptions': 0,
             'architecture': {'components': 0, 'connections': 0, 'data_stores': 0},
             'threat_actors': 0,
-            'trust_boundaries': {'trust_zones': 0, 'crossing_points': 0, 'trust_boundaries': 0},
+            'reviewed_threat_actors': 0,
+            'trust_boundaries': {
+                'trust_zones': 0,
+                'crossing_points': 0, 'trust_boundaries': 0,
+            },
             'asset_flows': {'assets': 0, 'flows': 0},
-            'threats_mitigations': {'threats': 5, 'mitigations': 3, 'assumption_links': 0, 'mitigation_links': 2},
+            'threats_mitigations': {'threats': 5, 'mitigations': 3, 'mitigation_links': 2},
             'progress': {'current_phase': 1, 'current_phase_name': 'Test', 'overall_completion': 0.0}
         }
         detect_phase_completion()

@@ -6,12 +6,14 @@ from mcp.server.fastmcp import Context
 from pydantic import Field
 import uuid
 
+from threat_modeling_mcp_server.models.models import SensitivityTier
 from threat_modeling_mcp_server.models.architecture_models import (
     Component, Connection, DataStore, Architecture,
     ComponentType, ServiceProvider, Protocol, DataStoreType,
-    DataClassification, BackupFrequency, AWSService
+    BackupFrequency, AWSService
 )
 from threat_modeling_mcp_server.utils.batch_utils import batch_add, batch_update, batch_delete
+from threat_modeling_mcp_server.utils.id_utils import next_id
 
 
 # Global state
@@ -49,7 +51,7 @@ async def add_component_impl(
     logger.debug(f'Adding component: {name}')
     
     # Generate a unique ID
-    component_id = f"C{len(components) + 1:03d}"
+    component_id = next_id(components, "C")
     
     # Create the component
     component = Component(
@@ -206,6 +208,18 @@ async def delete_component_impl(
     for connection in connections.values():
         if connection.source_id == id or connection.destination_id == id:
             return f"Cannot delete component {id} because it is used in connection {connection.id}."
+
+    from threat_modeling_mcp_server.tools.asset_flow_analyzer import flows
+
+    related_flows = [
+        flow.id for flow in flows.values()
+        if flow.source_id == id or flow.destination_id == id
+    ]
+    if related_flows:
+        return (
+            f"Cannot delete component {id} because it is used in asset flows: "
+            + ", ".join(sorted(related_flows))
+        )
     
     # Delete the component
     del components[id]
@@ -249,7 +263,7 @@ async def add_connection_impl(
         return f"Destination component with ID {destination_id} not found."
     
     # Generate a unique ID
-    connection_id = f"CN{len(connections) + 1:03d}"
+    connection_id = next_id(connections, "CN")
     
     # Create the connection
     connection = Connection(
@@ -440,14 +454,14 @@ async def add_data_store_impl(
     logger.debug(f'Adding data store: {name}')
     
     # Generate a unique ID
-    data_store_id = f"D{len(data_stores) + 1:03d}"
+    data_store_id = next_id(data_stores, "D")
     
     # Create the data store
     data_store = DataStore(
         id=data_store_id,
         name=name,
         type=DataStoreType(type),
-        classification=DataClassification(classification),
+        classification=SensitivityTier(classification),
         encryption_at_rest=encryption_at_rest,
         backup_frequency=BackupFrequency(backup_frequency) if backup_frequency else None,
         description=description
@@ -502,7 +516,7 @@ async def update_data_store_impl(
         data_store.type = DataStoreType(type)
     
     if classification is not None:
-        data_store.classification = DataClassification(classification)
+        data_store.classification = SensitivityTier(classification)
     
     if encryption_at_rest is not None:
         data_store.encryption_at_rest = encryption_at_rest
@@ -780,6 +794,12 @@ async def clear_architecture_impl(
         A confirmation message
     """
     logger.debug('Clearing architecture')
+
+    from threat_modeling_mcp_server.tools.asset_flow_analyzer import flows
+
+    if flows:
+        flow_ids = ", ".join(sorted(flows))
+        return f"Cannot clear architecture because it is used by asset flows: {flow_ids}"
     
     global architecture, components, connections, data_stores
     

@@ -22,14 +22,18 @@ You MUST follow these phases sequentially. Use `get_current_phase_status()` to t
 **Goal**: Understand what you are protecting and why it matters.
 
 **Workflow**:
-1. Read the project's code, README, and configuration files to understand the system
-2. Call `get_phase_1_guidance()` for detailed instructions
-3. Call `set_business_context()` with a comprehensive description AND all business features (industry_sector, data_sensitivity, user_base_size, geographic_scope, regulatory_requirements, system_criticality, financial_impact, authentication_requirement, deployment_environment, integration_complexity)
-4. Call `validate_business_context_completeness()` to confirm all features are set
-5. Use `add_assumption()` to document key business assumptions
-6. Call `advance_phase()` to proceed
+1. Call `set_project_directory_tool(directory=PROJECT_DIRECTORY)` with the project being modeled so conditional code validation examines the correct files
+2. Read the project's code, README, and configuration files to understand the system
+3. Call `get_phase_1_guidance()` for detailed instructions
+4. Call `manage_system_context(action="describe", section=SECTION)` as needed for exact fields and values in `business`, `software`, `data_assets`, `user_personas`, and `nfrs`
+5. Call `manage_system_context(action="set", section="all", values=CONTEXT)` once with a nested payload containing the complete business context (including `data_residency`, `compute_location`, `user_base_location`, and `organizational_headquarters`), one software profile, all known data asset profiles, every in-scope legitimate user or non-human identity, and all relevant NFRs; leave data-profile `asset_id` values unset until Phase 5
+6. Call `manage_system_context(action="validate", section="all")` to enforce business-context completeness and review classification-profile coverage
+7. Use `add_assumption()` to document key business assumptions
+8. Call `advance_phase()` to proceed
 
-**Validation Gate**: `validate_business_context_completeness()` must return PASSED before proceeding.
+**Validation Gate**: `manage_system_context(action="validate", section="all")` must
+return PASSED for business context before proceeding. Classification-profile coverage
+is reported by the same call but is not part of the server's Phase 1 completion gate.
 
 ### Phase 2: Architecture Analysis
 **Goal**: Document the system's technical architecture.
@@ -59,7 +63,9 @@ You MUST follow these phases sequentially. Use `get_current_phase_status()` to t
 6. Call `analyze_threat_actors()` for automated analysis
 7. Call `advance_phase()` to proceed
 
-**Validation Gate**: At least one threat actor must be marked as relevant.
+**Validation Gate**: At least one threat actor must be assessed -- relevance set,
+priority set, updated, or newly added. The 12 pre-loaded actors do not satisfy this on
+their own; they are a checklist to work through, not analysis.
 
 ### Phase 4: Trust Boundary Analysis
 **Goal**: Identify where trust levels change in the system.
@@ -67,27 +73,27 @@ You MUST follow these phases sequentially. Use `get_current_phase_status()` to t
 **Workflow**:
 1. Call `get_phase_4_guidance()` for detailed instructions
 2. Call `get_trust_boundary_detection_plan()` for AI-powered boundary detection guidance
-3. Use `add_trust_zone()` to define security domains (Untrusted, Low, Medium, High trust levels)
+3. Use `add_trust_zone()` to define security domains (Untrusted, Low, Medium, High, Full trust levels)
 4. Use `add_component_to_zone()` to assign components to zones
 5. Use `add_crossing_point()` to identify where data crosses trust boundaries
 6. Use `add_conn_to_crossing()` to map connections to crossing points
 7. Use `add_trust_boundary()` to define boundaries with security controls
 8. Call `advance_phase()` to proceed
 
-**Validation Gate**: `list_trust_zones()` must show at least one trust zone.
+**Validation Gate**: at least one trust zone.
 
 ### Phase 5: Asset Flow Analysis
 **Goal**: Track valuable assets through the system.
 
 **Workflow**:
 1. Call `get_phase_5_guidance()` for detailed instructions
-2. Use `add_asset()` for each valuable asset (data, credentials, IP) with classification, sensitivity, criticality
-3. Use `add_flow()` to document how assets move between components (include controls, encryption, risk_level)
-4. Call `get_asset_flow_analysis_plan()` for deeper analysis guidance
+2. Use `add_asset()` for each valuable asset (data, credentials, IP) with `classification` (Public/Internal/Confidential/Restricted), `data_states` (At rest/In transit/In use), `lifecycle_state`, `criticality`
+3. Use `manage_system_context(action="list", section="data_assets")`, then link each Phase 1 profile with `manage_system_context(action="update", section="data_assets", item_id=PROFILE_ID, values={"asset_id": ASSET_ID, ...})`; use `action="add", section="data_assets"` only for data assets first discovered in this phase
+4. Use `add_flow()` to document how assets move between components (include controls, encryption, risk_level)
 5. Document asset assumptions with `add_assumption()`
 6. Call `advance_phase()` to proceed
 
-**Validation Gate**: `list_assets()` must show at least one asset.
+**Validation Gate**: at least one asset.
 
 ### Phase 6: Threat Identification (STRIDE)
 **Goal**: Systematically identify threats using the STRIDE methodology.
@@ -107,15 +113,18 @@ You MUST follow these phases sequentially. Use `get_current_phase_status()` to t
    - `threat_action`: What the attacker does (max 200 chars)
    - `threat_impact`: What happens if successful (max 200 chars)
    - `category`: STRIDE category
-   - `severity`: Critical/High/Medium/Low/Info
-   - `likelihood`: Almost Certain/Likely/Possible/Unlikely/Rare
+   - `severity`: Low/Medium/High/Critical
+   - `likelihood`: Unlikely/Possible/Likely/Very Likely
    - `affected_components`: Component IDs
-   - `affected_assets`: Asset names
+   - `affected_assets`: Asset IDs
    - `tags`: Relevant tags
 4. **If using AWS services**: Use `search_documentation()` to research AWS-specific threat vectors (e.g., "S3 bucket security threats", "Lambda security risks", "API Gateway security threats")
 5. Call `advance_phase()` to proceed
 
-**Validation Gate**: `list_threats()` must show threats across multiple STRIDE categories.
+**Server Gate**: At least one threat must exist.
+
+**Quality Requirement**: Complete the systematic analysis and record threats across every
+applicable STRIDE category before advancing.
 
 ### Phase 7: Mitigation Planning
 **Goal**: Define security controls for each threat.
@@ -123,29 +132,32 @@ You MUST follow these phases sequentially. Use `get_current_phase_status()` to t
 **Workflow**:
 1. Call `get_phase_7_guidance()` for detailed instructions (this auto-detects if code exists)
 2. For each threat, identify appropriate mitigations:
-   - Use `add_mitigation()` with content, type (Preventive/Detective/Corrective/Compensating), status, implementation_details, cost, effectiveness
+   - Use `add_mitigation()` with content, type (Preventive/Detective/Corrective/Deterrent), status, implementation_details, cost, effectiveness
 3. **If using AWS services**: Use `search_documentation()` and `read_documentation()` to validate mitigation strategies against AWS best practices (e.g., "AWS WAF configuration best practices", "RDS security controls")
 4. Use `link_mitigation_to_threat()` to connect every mitigation to its threats
 5. Verify coverage: every threat should have at least one mitigation linked
 6. Verify linkage: every mitigation should be linked to at least one threat
 7. Call `advance_phase()` to proceed
 
-**Validation Gate**: `list_mitigations()` must show mitigations AND all threats must have linked mitigations.
+**Server Gate**: At least one mitigation and one mitigation-to-threat link must exist.
+
+**Quality Requirement**: Every threat must have at least one linked mitigation, and every
+mitigation must be linked to at least one threat, before advancing.
 
 ### Phase 7.5: Code Validation (Conditional)
 **Goal**: Validate threats against actual code implementation.
 
-This phase only runs if code is detected in the project directory.
+This phase only runs if code is detected in the project directory recorded with
+`set_project_directory_tool()` in Phase 1.
 
 **Workflow**:
 1. Call `get_phase_7_5_guidance()` for detailed instructions
-2. Call `validate_security_controls()` to analyze codebase for existing security controls
-3. Call `validate_threat_remediation()` to check which threats are already mitigated in code
-4. Call `generate_remediation_report()` for comprehensive analysis
-5. Update threat statuses based on findings using `update_threat()`
-6. Update mitigation statuses using `update_mitigation()`
-7. Document code-based assumptions with `add_assumption()`
-8. Call `advance_phase()` to proceed
+2. Call `manage_code_validation(action="describe")` for the finding contract
+3. Read and analyze the relevant project files yourself
+4. Call `manage_code_validation(action="record", values=FINDINGS)` with evidence for every current threat and mitigation; this applies statuses atomically
+5. Call `manage_code_validation(action="validate")` and resolve every missing or stale finding
+6. Call `manage_code_validation(action="report")` to render the report and finalize the current snapshot
+7. Call `advance_phase()` to proceed
 
 ### Phase 8: Residual Risk Analysis
 **Goal**: Assess remaining risk after mitigations.
@@ -167,8 +179,8 @@ This phase only runs if code is detected in the project directory.
 **Workflow**:
 1. Call `get_phase_9_guidance()` for detailed instructions
 2. Call `execute_final_export_step()` to auto-generate all outputs, OR manually:
-   - Call `export_comprehensive_threat_model()` for Threat Composer JSON + Markdown
-   - Call `export_threat_model_with_remediation_status()` if code validation was done
+   - Call `export_comprehensive_threat_model(output_path="threat_model.json")` for Threat Composer JSON + Markdown
+   - Threat and mitigation status updates from code validation are included in this comprehensive export
 3. Call `get_threat_model_progress()` for final progress summary
 4. Present the user with:
    - Location of exported files in `.threatmodel/` directory
@@ -201,7 +213,7 @@ Keep fields concise. The server will truncate if needed, but aim to stay within 
 - Every threat MUST have a STRIDE category
 - Every threat MUST have at least one linked mitigation
 - Every mitigation MUST be linked to at least one threat
-- Business context MUST have all 10 features set before proceeding
+- Business context MUST have all 12 required features set, including all four geographic facets, before proceeding
 - Assumptions should be documented for any decisions or scope limitations
 - Exports must be generated in both JSON (Threat Composer compatible) and Markdown formats
 

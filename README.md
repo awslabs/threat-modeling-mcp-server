@@ -1,6 +1,6 @@
 # Threat Modeling MCP Server
 
-A Model Context Protocol (MCP) server for comprehensive threat modeling with automatic code validation.
+A Model Context Protocol (MCP) server for comprehensive threat modeling with guided code validation.
 
 ## Table of Contents
 
@@ -16,7 +16,6 @@ A Model Context Protocol (MCP) server for comprehensive threat modeling with aut
 - [Threat Modeling Methodology](#threat-modeling-methodology)
 - [Assumptions in Threat Modeling](#assumptions-in-threat-modeling)
 - [Development](#development)
-- [Roadmap](#roadmap)
 
 ## Overview
 
@@ -28,16 +27,16 @@ This MCP Server calls the existing agent's LLM instead of making an external API
 This Threat Modeling MCP Server has three main functionalities:
 1. Threat modeling phase or state management and prompt controlling.
 2. Prompts steering, which controls the agent to go through a methodic approach to threat modeling using built in definitions of business risks, exposures, threat actors and use STRIDE in sequential order.
-3. Data validation at every state or phase, which in turn produces actionable threat model report.
+3. Structured input validation and phase-completion checks that support an actionable threat model report.
 
 It also has tools to generate a final report in both Markdown and JSON exportable formats.
 
 ### Key Advantages of this approach
 - This threat model follows the standard STRIDE approach to threat modeling in phases rather than quick conclusion of assets, boundaries and threats which can lead to hallucination or low quality output.
 - There is an effort by LLM to understand the business context of the project and make valid assumptions which can be controlled by the user.
-- The main advantage of using this local running threat modeling MCP server is that it leverages the client's existing LLM (Cline, Amazon-Q, Kiro). Any data which is processed or sent is limited to the client or other MCP servers you may have installed and invoked. This server doesn't call any other external APIs or send or receive data beyond calling the client's LLM or additional billing or tokens than what your client is already configured to use.
-- This threat modeling approach stores your threat model in the same repository as `.threatmodel` directory and you can evolve your threat model as your code, design and architecture evolves.
-- This threat model approach looks at the code if its present and updates the threats if they are already mitigated in the code level controls. You can rerun threat model once you fix your code and it should look at the fix to update the threat model quickly.
+- This local server relies on the MCP client's configured LLM (Cline, Amazon Q, Kiro) rather than calling a separate model API. Data exposure depends on the client and any other MCP servers the client invokes.
+- The server keeps the working threat model in memory for the current process. Export tools can write JSON and Markdown snapshots to a `.threatmodel` directory, but those snapshots are not automatically loaded in a later session.
+- The code-validation tool records evidence supplied by the client after it inspects the implementation, applies status transitions atomically, and fails the phase closed until every current threat and mitigation is covered.
 
 ## Quick Start Prompts and Examples on how to threat model with this MCP server
 
@@ -53,7 +52,7 @@ Being specific in the prompt to use the threat modeling MCP Server will make sur
 ```
 "Threat model this subfolder using the threat modeling MCP Server"
 ```
-Running it on a subfolder will limit the scope of threat model and code to that subfolder and save results as a `.threatmodel` directory within the subfolder.
+Running it on a subfolder limits the intended analysis scope. To save exports there, request an output path inside that subfolder; the export location is not inferred automatically from the analysis scope.
 
 ### Save the result of threat model
 ```
@@ -102,7 +101,7 @@ Running it on a subfolder will limit the scope of threat model and code to that 
 ## Key Features
 
 - **Comprehensive Threat Modeling**: Structured approach to identifying, evaluating, and addressing security risks
-- **Automatic Code Validation**: Detects code in the project directory and automatically validates the threat model against it
+- **Evidence-Based Code Validation**: Records implementation evidence, updates statuses, and produces a deterministic report
 - **Business Context Analysis**: Understand the business value and criticality of the system
 - **Architecture Analysis**: Document the system's technical architecture and data flows
 - **Threat Actor Analysis**: Identify potential adversaries and assess their capabilities
@@ -151,7 +150,7 @@ Add the following to your MCP client configuration:
         "FASTMCP_LOG_LEVEL": "ERROR"
       },
       "disabled": false,
-      "autoApprove": ["add_asset","add_assumption","add_component","add_component_to_zone","add_conn_to_crossing","add_connection","add_crossing_point","add_data_store","add_flow","add_mitigation","add_threat","add_threat_actor","add_trust_boundary","add_trust_zone","advance_phase","analyze_threat_actors","clear_architecture","clear_asset_flows","clear_business_context","clear_threat_actors","clear_trust_boundaries","delete_asset","delete_assumption","delete_component","delete_connection","delete_crossing_point","delete_data_store","delete_flow","delete_mitigation","delete_threat","delete_threat_actor","delete_trust_boundary","delete_trust_zone","execute_code_validation_step","execute_final_export_step","export_comprehensive_threat_model","export_threat_model_with_remediation_status","follow_threat_modeling_plan","generate_remediation_report","get_architecture_analysis_plan","get_asset","get_asset_flow_analysis_plan","get_assumption","get_business_context","get_business_context_analysis_plan","get_business_context_features","get_crossing_point","get_current_phase_status","get_data_model_types","get_flow","get_mitigation","get_phase_1_guidance","get_phase_2_guidance","get_phase_3_guidance","get_phase_4_guidance","get_phase_5_guidance","get_phase_6_guidance","get_phase_7_5_guidance","get_phase_7_guidance","get_phase_8_guidance","get_phase_9_guidance","get_threat","get_threat_actor","get_threat_model_progress","get_threat_modeling_plan","get_trust_boundary","get_trust_boundary_analysis_plan","get_trust_boundary_detection_plan","get_trust_zone","link_mitigation_to_threat","list_assets","list_assumptions","list_components","list_connections","list_crossing_points","list_data_models","list_data_stores","list_flows","list_mitigations","list_threat_actors","list_threats","list_trust_boundaries","list_trust_zones","remove_component_from_zone","remove_conn_from_crossing","reset_asset_flows","reset_threat_actors","set_business_context","set_threat_actor_priority","set_threat_actor_relevance","unlink_mitigation_from_threat","update_asset","update_assumption","update_component","update_connection","update_crossing_point","update_data_store","update_flow","update_mitigation","update_threat","update_threat_actor","update_trust_boundary","update_trust_zone","validate_business_context_completeness","validate_security_controls","validate_threat_model_against_code","validate_threat_remediation"]
+      "autoApprove": ["add_asset","add_assumption","add_component","add_component_to_zone","add_conn_to_crossing","add_connection","add_crossing_point","add_data_store","add_flow","add_mitigation","add_threat","add_threat_actor","add_trust_boundary","add_trust_zone","advance_phase","analyze_threat_actors","clear_architecture","clear_asset_flows","clear_threat_actors","clear_trust_boundaries","delete_asset","delete_assumption","delete_component","delete_connection","delete_crossing_point","delete_data_store","delete_flow","delete_mitigation","delete_threat","delete_threat_actor","delete_trust_boundary","delete_trust_zone","execute_final_export_step","export_comprehensive_threat_model","follow_threat_modeling_plan","get_architecture_analysis_plan","get_asset","get_assumption","get_crossing_point","get_current_phase_status","get_data_model_types","get_flow","get_mitigation","get_phase_1_guidance","get_phase_2_guidance","get_phase_3_guidance","get_phase_4_guidance","get_phase_5_guidance","get_phase_6_guidance","get_phase_7_5_guidance","get_phase_7_guidance","get_phase_8_guidance","get_phase_9_guidance","get_threat","get_threat_actor","get_threat_model_progress","get_threat_modeling_plan","get_trust_boundary","get_trust_boundary_analysis_plan","get_trust_boundary_detection_plan","get_trust_zone","link_mitigation_to_threat","list_assets","list_assumptions","list_components","list_connections","list_crossing_points","list_data_models","list_data_stores","list_flows","list_mitigations","list_threat_actors","list_threats","list_trust_boundaries","list_trust_zones","manage_code_validation","manage_system_context","remove_component_from_zone","remove_conn_from_crossing","reset_threat_actors","set_project_directory_tool","set_threat_actor_priority","set_threat_actor_relevance","unlink_mitigation_from_threat","update_asset","update_assumption","update_component","update_connection","update_crossing_point","update_data_store","update_flow","update_mitigation","update_threat","update_threat_actor","update_trust_boundary","update_trust_zone"]
     }
   }
 }
@@ -172,7 +171,7 @@ Add the following to your MCP client configuration:
         "FASTMCP_LOG_LEVEL": "ERROR"
       },
       "disabled": false,
-      "autoApprove": ["add_asset","add_assumption","add_component","add_component_to_zone","add_conn_to_crossing","add_connection","add_crossing_point","add_data_store","add_flow","add_mitigation","add_threat","add_threat_actor","add_trust_boundary","add_trust_zone","advance_phase","analyze_threat_actors","clear_architecture","clear_asset_flows","clear_business_context","clear_threat_actors","clear_trust_boundaries","delete_asset","delete_assumption","delete_component","delete_connection","delete_crossing_point","delete_data_store","delete_flow","delete_mitigation","delete_threat","delete_threat_actor","delete_trust_boundary","delete_trust_zone","execute_code_validation_step","execute_final_export_step","export_comprehensive_threat_model","export_threat_model_with_remediation_status","follow_threat_modeling_plan","generate_remediation_report","get_architecture_analysis_plan","get_asset","get_asset_flow_analysis_plan","get_assumption","get_business_context","get_business_context_analysis_plan","get_business_context_features","get_crossing_point","get_current_phase_status","get_data_model_types","get_flow","get_mitigation","get_phase_1_guidance","get_phase_2_guidance","get_phase_3_guidance","get_phase_4_guidance","get_phase_5_guidance","get_phase_6_guidance","get_phase_7_5_guidance","get_phase_7_guidance","get_phase_8_guidance","get_phase_9_guidance","get_threat","get_threat_actor","get_threat_model_progress","get_threat_modeling_plan","get_trust_boundary","get_trust_boundary_analysis_plan","get_trust_boundary_detection_plan","get_trust_zone","link_mitigation_to_threat","list_assets","list_assumptions","list_components","list_connections","list_crossing_points","list_data_models","list_data_stores","list_flows","list_mitigations","list_threat_actors","list_threats","list_trust_boundaries","list_trust_zones","remove_component_from_zone","remove_conn_from_crossing","reset_asset_flows","reset_threat_actors","set_business_context","set_threat_actor_priority","set_threat_actor_relevance","unlink_mitigation_from_threat","update_asset","update_assumption","update_component","update_connection","update_crossing_point","update_data_store","update_flow","update_mitigation","update_threat","update_threat_actor","update_trust_boundary","update_trust_zone","validate_business_context_completeness","validate_security_controls","validate_threat_model_against_code","validate_threat_remediation"],
+      "autoApprove": ["add_asset","add_assumption","add_component","add_component_to_zone","add_conn_to_crossing","add_connection","add_crossing_point","add_data_store","add_flow","add_mitigation","add_threat","add_threat_actor","add_trust_boundary","add_trust_zone","advance_phase","analyze_threat_actors","clear_architecture","clear_asset_flows","clear_threat_actors","clear_trust_boundaries","delete_asset","delete_assumption","delete_component","delete_connection","delete_crossing_point","delete_data_store","delete_flow","delete_mitigation","delete_threat","delete_threat_actor","delete_trust_boundary","delete_trust_zone","execute_final_export_step","export_comprehensive_threat_model","follow_threat_modeling_plan","get_architecture_analysis_plan","get_asset","get_assumption","get_crossing_point","get_current_phase_status","get_data_model_types","get_flow","get_mitigation","get_phase_1_guidance","get_phase_2_guidance","get_phase_3_guidance","get_phase_4_guidance","get_phase_5_guidance","get_phase_6_guidance","get_phase_7_5_guidance","get_phase_7_guidance","get_phase_8_guidance","get_phase_9_guidance","get_threat","get_threat_actor","get_threat_model_progress","get_threat_modeling_plan","get_trust_boundary","get_trust_boundary_analysis_plan","get_trust_boundary_detection_plan","get_trust_zone","link_mitigation_to_threat","list_assets","list_assumptions","list_components","list_connections","list_crossing_points","list_data_models","list_data_stores","list_flows","list_mitigations","list_threat_actors","list_threats","list_trust_boundaries","list_trust_zones","manage_code_validation","manage_system_context","remove_component_from_zone","remove_conn_from_crossing","reset_threat_actors","set_project_directory_tool","set_threat_actor_priority","set_threat_actor_relevance","unlink_mitigation_from_threat","update_asset","update_assumption","update_component","update_connection","update_crossing_point","update_data_store","update_flow","update_mitigation","update_threat","update_threat_actor","update_trust_boundary","update_trust_zone"],
       "timeout": 60,
       "type": "stdio"
     }
@@ -195,7 +194,7 @@ Add the following to your MCP client configuration:
         "FASTMCP_LOG_LEVEL": "ERROR"
       },
       "disabled": false,
-      "autoApprove": ["add_asset","add_assumption","add_component","add_component_to_zone","add_conn_to_crossing","add_connection","add_crossing_point","add_data_store","add_flow","add_mitigation","add_threat","add_threat_actor","add_trust_boundary","add_trust_zone","advance_phase","analyze_threat_actors","clear_architecture","clear_asset_flows","clear_business_context","clear_threat_actors","clear_trust_boundaries","delete_asset","delete_assumption","delete_component","delete_connection","delete_crossing_point","delete_data_store","delete_flow","delete_mitigation","delete_threat","delete_threat_actor","delete_trust_boundary","delete_trust_zone","execute_code_validation_step","execute_final_export_step","export_comprehensive_threat_model","export_threat_model_with_remediation_status","follow_threat_modeling_plan","generate_remediation_report","get_architecture_analysis_plan","get_asset","get_asset_flow_analysis_plan","get_assumption","get_business_context","get_business_context_analysis_plan","get_business_context_features","get_crossing_point","get_current_phase_status","get_data_model_types","get_flow","get_mitigation","get_phase_1_guidance","get_phase_2_guidance","get_phase_3_guidance","get_phase_4_guidance","get_phase_5_guidance","get_phase_6_guidance","get_phase_7_5_guidance","get_phase_7_guidance","get_phase_8_guidance","get_phase_9_guidance","get_threat","get_threat_actor","get_threat_model_progress","get_threat_modeling_plan","get_trust_boundary","get_trust_boundary_analysis_plan","get_trust_boundary_detection_plan","get_trust_zone","link_mitigation_to_threat","list_assets","list_assumptions","list_components","list_connections","list_crossing_points","list_data_models","list_data_stores","list_flows","list_mitigations","list_threat_actors","list_threats","list_trust_boundaries","list_trust_zones","remove_component_from_zone","remove_conn_from_crossing","reset_asset_flows","reset_threat_actors","set_business_context","set_threat_actor_priority","set_threat_actor_relevance","unlink_mitigation_from_threat","update_asset","update_assumption","update_component","update_connection","update_crossing_point","update_data_store","update_flow","update_mitigation","update_threat","update_threat_actor","update_trust_boundary","update_trust_zone","validate_business_context_completeness","validate_security_controls","validate_threat_model_against_code","validate_threat_remediation"]
+      "autoApprove": ["add_asset","add_assumption","add_component","add_component_to_zone","add_conn_to_crossing","add_connection","add_crossing_point","add_data_store","add_flow","add_mitigation","add_threat","add_threat_actor","add_trust_boundary","add_trust_zone","advance_phase","analyze_threat_actors","clear_architecture","clear_asset_flows","clear_threat_actors","clear_trust_boundaries","delete_asset","delete_assumption","delete_component","delete_connection","delete_crossing_point","delete_data_store","delete_flow","delete_mitigation","delete_threat","delete_threat_actor","delete_trust_boundary","delete_trust_zone","execute_final_export_step","export_comprehensive_threat_model","follow_threat_modeling_plan","get_architecture_analysis_plan","get_asset","get_assumption","get_crossing_point","get_current_phase_status","get_data_model_types","get_flow","get_mitigation","get_phase_1_guidance","get_phase_2_guidance","get_phase_3_guidance","get_phase_4_guidance","get_phase_5_guidance","get_phase_6_guidance","get_phase_7_5_guidance","get_phase_7_guidance","get_phase_8_guidance","get_phase_9_guidance","get_threat","get_threat_actor","get_threat_model_progress","get_threat_modeling_plan","get_trust_boundary","get_trust_boundary_analysis_plan","get_trust_boundary_detection_plan","get_trust_zone","link_mitigation_to_threat","list_assets","list_assumptions","list_components","list_connections","list_crossing_points","list_data_models","list_data_stores","list_flows","list_mitigations","list_threat_actors","list_threats","list_trust_boundaries","list_trust_zones","manage_code_validation","manage_system_context","remove_component_from_zone","remove_conn_from_crossing","reset_threat_actors","set_project_directory_tool","set_threat_actor_priority","set_threat_actor_relevance","unlink_mitigation_from_threat","update_asset","update_assumption","update_component","update_connection","update_crossing_point","update_data_store","update_flow","update_mitigation","update_threat","update_threat_actor","update_trust_boundary","update_trust_zone"]
     }
   }
 }
@@ -213,7 +212,7 @@ This trusts all tools from the `threat-modeling-mcp-server` MCP server, so you w
 
 ### Running with the Custom Kiro CLI Agent
 
-This repository includes a pre-configured Kiro CLI agent that provides a guided, 9-phase threat modeling experience. The agent configuration is in `.kiro/agents/threat-modeler.json`.
+This repository includes a pre-configured Kiro CLI agent that covers nine numbered phases plus the optional Phase 7.5 code-validation step. The agent configuration is in `.kiro/agents/threat-modeler.json`.
 
 **Global install** (available from any directory):
 
@@ -240,19 +239,20 @@ kiro-cli chat --agent threat-modeler
 ```
 
 **What the agent includes**:
-- **System prompt** (`.kiro/prompts/threat-modeler.md`): Detailed instructions for the 9-phase STRIDE methodology
-- **Skills** (`.kiro/skills/`): Per-phase reference materials for each of the 9 threat modeling phases
+- **System prompt** (`.kiro/prompts/threat-modeler.md`): Detailed instructions for the phased STRIDE methodology
+- **Skills** (`.kiro/skills/`): Per-phase reference materials, including optional Phase 7.5
 - **Auto-approved MCP tools**: All threat modeling tools run without manual approval prompts
 
 ## Output File Management
 
-All output files generated by the threat modeling server are automatically saved to a `.threatmodel` directory in your project root. This includes:
+The comprehensive export tools write JSON and Markdown files to a `.threatmodel`
+directory next to the requested output path. The directory is created when an
+export runs. `execute_final_export_step()` uses the server's current working
+directory because it supplies a relative output filename.
 
-- Exported threat models (JSON format)
-- Validation reports
-- Analysis results
-
-The `.threatmodel` directory is created automatically when needed.
+Validation and analysis tools generally return text through MCP rather than
+writing report files. The exported files are snapshots; the server does not
+automatically reload them when a new process starts.
 
 ## Quick Reference
 
@@ -263,13 +263,13 @@ The `.threatmodel` directory is created automatically when needed.
 | `get_threat_modeling_plan()` | Get comprehensive plan | Start here for overview |
 | **`get_phase_1_guidance()`** | **Get focused Phase 1 guidance** | **Recommended starting point** |
 | `get_current_phase_status()` | Check progress | Track completion status |
-| `set_business_context(desc)` | Define system context | "E-commerce payment system" |
+| `manage_system_context(action, section, ...)` | Define business context and taxonomy profiles | `action="set", section="all"` |
 | `add_component(name, type)` | Add architecture component | "API Gateway", "Network" |
 | `add_threat(source, prereq, action, impact)` | Identify threat | "Attacker", "network access", "SQL injection", "data breach" |
 | `add_mitigation(content)` | Add security control | "Input validation and parameterized queries" |
 | `link_mitigation_to_threat(m_id, t_id)` | Link controls to threats | Connect mitigations to specific threats |
-| **`execute_code_validation_step()`** | **Auto-execute Phase 7.5** | **Ensures code validation completion** |
-| **`execute_final_export_step()`** | **Auto-execute Phase 9** | **Generates all required files** |
+| `manage_code_validation(action, values)` | Record and report code-validation evidence | Start with `action="describe"` |
+| **`execute_final_export_step()`** | **Execute Phase 9 export** | **Generates JSON and Markdown snapshots** |
 
 ### 🚀 Step-by-Step Guidance
 
@@ -284,31 +284,28 @@ The `.threatmodel` directory is created automatically when needed.
 | 5 | `get_phase_5_guidance()` | Asset Flow Analysis |
 | 6 | `get_phase_6_guidance()` | Threat Identification |
 | 7 | `get_phase_7_guidance()` | Mitigation Planning |
-| 7.5 | `execute_code_validation_step()` | Code Validation (Auto) |
+| 7.5 | `get_phase_7_5_guidance()` | Guided Code Validation (Optional) |
 | 8 | `get_phase_8_guidance()` | Residual Risk Analysis |
 | 9 | `execute_final_export_step()` | Final Export (Auto) |
 
 ## Tools Overview
 
-The Threat Modeling MCP Server provides **100+ tools** organized into the following categories:
+The Threat Modeling MCP Server provides **96 tools** organized into the following categories:
 
 | Category | Tools | Description |
 |----------|-------|-------------|
 | **Threat Modeling Plan** | 1 tool | Generate comprehensive threat modeling plans |
 | **Assumption Management** | 5 tools | Add, list, get, update, and delete assumptions |
-| **Business Context Analysis** | 13 tools | Analyze business context and requirements |
-| **Architecture Analysis** | 13 tools | Document and analyze system architecture |
+| **System Context** | 1 tool | Manage business context plus software, data, user, and NFR taxonomy profiles |
+| **Architecture Analysis** | 14 tools | Document and analyze system architecture |
 | **Threat Actor Analysis** | 10 tools | Identify and analyze potential threat actors |
-| **Trust Boundary Analysis** | 18 tools | Analyze trust zones, boundaries, and crossing points |
+| **Trust Boundary Analysis** | 21 tools | Analyze trust zones, boundaries, and crossing points |
 | **Trust Boundary Detection** | 1 tool | AI-powered trust boundary detection |
-| **Asset Flow Analysis** | 12 tools | Track and analyze asset flows through the system |
-| **Threat Generation** | 4 tools | Add, list, get, and delete threats |
-| **Mitigation Management** | 7 tools | Manage mitigations and link them to threats |
-| **Threat Model Guide** | 3 tools | Step-by-step guidance through the process |
+| **Asset Flow Analysis** | 11 tools | Track and analyze asset flows through the system |
+| **Threat Generation and Mitigation** | 13 tools | Manage threats and mitigations, and link them together |
 | **Data Model Types** | 2 tools | Explore available data model types |
-| **Code Security Validation** | 3 tools | Validate security controls in code |
-| **Threat Model Validation** | 2 tools | Validate threat models against code |
-| **Step Orchestrator** | 12 tools | Phase-specific guidance and step execution |
+| **Code Validation** | 1 tool | Record evidence, apply statuses, validate coverage, and render reports |
+| **Step Orchestrator** | 16 tools | Phase-specific guidance and step execution |
 
 ## Threat Modeling Methodology
 
@@ -329,15 +326,16 @@ The server uses the STRIDE methodology for systematic threat identification:
 
 The comprehensive threat modeling process includes these phases:
 
-1. **Business Context Analysis**: Understanding the business value and criticality of the system
-2. **Architecture Analysis**: Documenting the system's technical architecture
-3. **Threat Actor Analysis**: Identifying potential adversaries and their capabilities
-4. **Trust Boundary Analysis**: Identifying trust zones and boundary crossings
-5. **Asset Flow Analysis**: Tracking critical assets through the system
-6. **Threat Identification**: Systematically identifying potential threats using STRIDE
-7. **Mitigation Planning**: Developing strategies to address identified threats
-8. **Code Validation**: Validating threats against existing security controls
-9. **Residual Risk Analysis**: Assessing remaining risks after mitigations
+- **Phase 1 - Business Context Analysis**: Understanding the business value and criticality of the system
+- **Phase 2 - Architecture Analysis**: Documenting the system's technical architecture
+- **Phase 3 - Threat Actor Analysis**: Identifying potential adversaries and their capabilities
+- **Phase 4 - Trust Boundary Analysis**: Identifying trust zones and boundary crossings
+- **Phase 5 - Asset Flow Analysis**: Tracking critical assets through the system
+- **Phase 6 - Threat Identification**: Systematically identifying potential threats using STRIDE
+- **Phase 7 - Mitigation Planning**: Developing strategies to address identified threats
+- **Phase 7.5 - Code Validation Analysis (optional)**: Recording implementation evidence for every threat and mitigation
+- **Phase 8 - Residual Risk Analysis**: Assessing remaining risks after mitigations
+- **Phase 9 - Output Generation and Documentation**: Exporting the completed threat model
 
 Each phase includes specific objectives, activities, and outputs to guide the threat modeling process.
 
@@ -347,14 +345,20 @@ Each phase includes specific objectives, activities, and outputs to guide the th
 - **High**: Significant risk, should be addressed quickly
 - **Medium**: Moderate risk, address in normal development cycle
 - **Low**: Minor risk, address when convenient
-- **Info**: Informational finding, no immediate action required
+
+### Threat Likelihood Levels
+
+- **Very Likely**: Expected to occur
+- **Likely**: More likely than not
+- **Possible**: Plausible given the right conditions
+- **Unlikely**: Would require unusual circumstances
 
 ### Mitigation Types
 
 - **Preventive**: Controls that prevent threats from occurring
 - **Detective**: Controls that detect when threats occur
 - **Corrective**: Controls that respond to and correct threats
-- **Compensating**: Alternative controls when primary controls aren't feasible
+- **Deterrent**: Controls that discourage an attacker from attempting the threat
 
 ## Assumptions in Threat Modeling
 
@@ -377,9 +381,11 @@ By documenting assumptions, we can:
 To contribute to this project:
 
 1. Clone the repository
-2. Install development dependencies with `uv pip install -e .`
-3. Run the server locally with `python run_server.py`
-4. Run tests with `python -m pytest`
+2. Create a virtual environment with `uv venv`
+3. Activate it with `source .venv/bin/activate` (Windows PowerShell: `.venv\Scripts\Activate.ps1`)
+4. Install the package and test dependencies with `uv pip install -e '.[test]'`
+5. Run the server locally with `python run_server.py`
+6. Run tests with `python -m pytest`
 
 ## Security
 

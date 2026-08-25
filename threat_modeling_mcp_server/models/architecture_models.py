@@ -3,6 +3,7 @@
 from enum import Enum
 from typing import Dict, List, Optional, Any
 from pydantic import BaseModel, field_validator
+from threat_modeling_mcp_server.models.models import SensitivityTier
 from threat_modeling_mcp_server.validation.enum_validator import validate_enum_with_enhanced_error
 
 
@@ -83,15 +84,6 @@ class DataStoreType(str, Enum):
     OTHER = "Other"
 
 
-class DataClassification(str, Enum):
-    """Data classification enum."""
-    PUBLIC = "Public"
-    INTERNAL = "Internal"
-    CONFIDENTIAL = "Confidential"
-    RESTRICTED = "Restricted"
-    REGULATED = "Regulated"
-
-
 class BackupFrequency(str, Enum):
     """Backup frequency enum."""
     HOURLY = "Hourly"
@@ -145,7 +137,7 @@ class DataStore(BaseModel):
     id: str
     name: str
     type: DataStoreType
-    classification: DataClassification
+    classification: SensitivityTier
     encryption_at_rest: bool = False
     backup_frequency: Optional[BackupFrequency] = None
     description: Optional[str] = None
@@ -158,7 +150,7 @@ class DataStore(BaseModel):
     @field_validator('classification', mode='before')
     @classmethod
     def validate_classification(cls, v):
-        return validate_enum_with_enhanced_error(v, DataClassification, 'classification')
+        return validate_enum_with_enhanced_error(v, SensitivityTier, 'classification')
     
     @field_validator('backup_frequency', mode='before')
     @classmethod

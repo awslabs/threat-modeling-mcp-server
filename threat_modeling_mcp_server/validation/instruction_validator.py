@@ -154,6 +154,7 @@ def generate_tool_documentation(modules: List) -> str:
         'threat_model_plan': 'Threat Modeling Plan',
         'assumption_manager': 'Assumption Management',
         'business_context': 'Business Context Analysis',
+        'system_context': 'System Context',
         'architecture_analyzer': 'Architecture Analysis',
         'threat_actor_analyzer': 'Threat Actor Analysis',
         'trust_boundary_analyzer': 'Trust Boundary Analysis',

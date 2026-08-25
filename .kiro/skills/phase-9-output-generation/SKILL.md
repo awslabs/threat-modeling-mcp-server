@@ -22,8 +22,8 @@ Manual export with custom filename.
 - Generates BOTH `.tc.json` and `.md` files
 - JSON is Threat Composer compatible (schema version 1)
 
-### export_threat_model_with_remediation_status(output_path)
-Export including code validation results (use after Phase 7.5).
+The comprehensive export includes current threat and mitigation statuses plus
+structured Phase 7.5 findings and evidence under `codeValidation`.
 
 ### Progress Tools
 - `get_threat_model_progress()` -- Final progress summary with phase completion
@@ -45,7 +45,7 @@ Export including code validation results (use after Phase 7.5).
   "dataflow": { "description": "" },
   "assumptions": [...],
   "mitigations": [...],
-  "assumptionLinks": [...],
+  "assumptionLinks": [],
   "mitigationLinks": [...],
   "threats": [...]
 }
@@ -83,6 +83,7 @@ Contains:
 - Assets and flows with risk levels
 - Threats grouped by status
 - Mitigations grouped by status with linked threats
+- Code-validation findings and implementation evidence
 - Assumptions with rationale
 - Phase progress table
 

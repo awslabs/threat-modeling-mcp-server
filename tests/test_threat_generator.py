@@ -44,13 +44,11 @@ def clear_global_state():
     mitigations.clear()
     # Use module reference to handle reassignment
     threat_generator_module.mitigation_links = []
-    threat_generator_module.assumption_links = []
     yield
     # Cleanup after test
     threats.clear()
     mitigations.clear()
     threat_generator_module.mitigation_links = []
-    threat_generator_module.assumption_links = []
 
 
 class TestAddThreat:
@@ -253,6 +251,22 @@ class TestListThreats:
         result = await list_threats_impl(ctx=mock_context)
         assert "attacker1" in result
         assert "attacker2" in result
+
+    @pytest.mark.asyncio
+    async def test_registered_tool_lists_id_required_by_follow_up_tools(self):
+        import threat_modeling_mcp_server.server as srv
+
+        _, added = await srv.mcp.call_tool("add_threat", {
+            "threat_source": "attacker",
+            "prerequisites": "with access",
+            "threat_action": "tamper with data",
+            "threat_impact": "loss of integrity",
+        })
+        threat_id = added["result"].split("Threat added with ID: ", 1)[1]
+
+        _, listed = await srv.mcp.call_tool("list_threats", {})
+
+        assert f"**ID:** {threat_id}" in listed["result"]
 
     @pytest.mark.asyncio
     async def test_list_threats_filter_by_category(self, mock_context):

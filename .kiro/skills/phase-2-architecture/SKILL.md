@@ -36,7 +36,7 @@ Document every component, connection, and data store in the system. This becomes
 |---|---|---|
 | name | Yes | e.g., "Customer PII Store" |
 | type | Yes | Relational, NoSQL, Object Storage, File System, Cache, Data Warehouse, Graph, Time Series, Ledger, Other |
-| classification | Yes | Public, Internal, Confidential, Restricted, Regulated |
+| classification | Yes | Public, Internal, Confidential, Restricted |
 | encryption_at_rest | No | true/false |
 | backup_frequency | No | Hourly, Daily, Weekly, Monthly, Continuous, None |
 | description | No | What data is stored |

@@ -1,52 +1,64 @@
-"""Code Validation Models for the Threat Modeling MCP Server.
-
-This module defines models for code security validation and remediation status tracking.
-"""
+"""Models for evidence-based code validation findings."""
 
 from enum import Enum
-from typing import Dict, List, Optional, Any
-from pydantic import BaseModel
+from typing import List, Optional
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
-class RemediationStatus(str, Enum):
-    """Remediation status enum."""
-    NOT_REMEDIATED = "Not Remediated"
-    PARTIALLY_REMEDIATED = "Partially Remediated"
-    FULLY_REMEDIATED = "Fully Remediated"
+class ThreatValidationOutcome(str, Enum):
+    """Code-validation outcomes for threats."""
+
+    FULLY_MITIGATED = "fully_mitigated"
+    PARTIALLY_MITIGATED = "partially_mitigated"
+    NOT_MITIGATED = "not_mitigated"
+    NOT_APPLICABLE = "not_applicable"
 
 
-class SecurityControlDetection(BaseModel):
-    """Model for a detected security control in code."""
-    control_type: str
-    file_path: str
-    line_number: int
-    matched_pattern: str
-    context: str
-    language: str
+class MitigationValidationOutcome(str, Enum):
+    """Code-validation outcomes for mitigations."""
+
+    IMPLEMENTED = "implemented"
+    PARTIALLY_IMPLEMENTED = "partially_implemented"
+    NOT_IMPLEMENTED = "not_implemented"
+    NOT_APPLICABLE = "not_applicable"
 
 
-class SecurityControl(BaseModel):
-    """Model for a security control."""
-    id: str
-    name: str
-    description: str
-    control_type: str
-    applicable_threats: List[str]
-    implementation_guidance: str
+class _EvidenceFinding(BaseModel):
+    """Shared evidence fields for one validation finding."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    evidence: List[str] = Field(min_length=1)
+    recommendation: Optional[str] = None
+
+    @field_validator("evidence")
+    @classmethod
+    def validate_evidence(cls, values: List[str]) -> List[str]:
+        """Require concrete, non-empty evidence entries."""
+        cleaned = [value.strip() for value in values]
+        if any(not value for value in cleaned):
+            raise ValueError("evidence entries must not be blank")
+        return cleaned
+
+    @field_validator("recommendation")
+    @classmethod
+    def normalize_recommendation(cls, value: Optional[str]) -> Optional[str]:
+        """Treat an empty recommendation as absent."""
+        if value is None:
+            return None
+        return value.strip() or None
 
 
-class CodeValidationResult(BaseModel):
-    """Model for code validation results."""
-    detected_controls: Dict[str, List[Dict[str, Any]]]
-    threat_remediation_status: Dict[str, RemediationStatus]
-    summary: str
+class ThreatCodeFinding(_EvidenceFinding):
+    """Evidence and outcome for one threat."""
+
+    threat_id: str = Field(min_length=1)
+    outcome: ThreatValidationOutcome
 
 
-class RemediationReport(BaseModel):
-    """Model for a comprehensive remediation report."""
-    fully_remediated_threats: List[str]
-    partially_remediated_threats: List[str]
-    unremediated_threats: List[str]
-    detected_controls_summary: Dict[str, int]
-    recommendations: List[str]
-    overall_security_score: float  # 0.0 to 1.0
+class MitigationCodeFinding(_EvidenceFinding):
+    """Evidence and outcome for one mitigation."""
+
+    mitigation_id: str = Field(min_length=1)
+    outcome: MitigationValidationOutcome

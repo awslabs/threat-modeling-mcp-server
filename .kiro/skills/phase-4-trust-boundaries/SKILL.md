@@ -8,6 +8,12 @@ description: Phase 4 Trust Boundary Analysis guide. Use when defining trust zone
 ## Objective
 Identify where trust levels change in the system. Every crossing point is a potential attack surface that needs security controls.
 
+`list_trust_zones()` starts out non-empty: the server pre-loads a generic set of zones,
+crossing points and boundaries as examples. They are not this system's boundaries. The
+phase gate and the exported report both count only records you have added or edited;
+untouched examples are listed in the report's "Appendix: Reference Catalogue (Not
+Reviewed)".
+
 ## Concepts
 
 - **Trust Zone**: A region where components share the same trust level

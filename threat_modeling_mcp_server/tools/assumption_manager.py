@@ -7,6 +7,7 @@ from pydantic import Field
 
 from threat_modeling_mcp_server.models.models import Assumption
 from threat_modeling_mcp_server.utils.batch_utils import batch_add, batch_update, batch_delete
+from threat_modeling_mcp_server.utils.id_utils import next_id
 
 
 # In-memory storage for assumptions
@@ -35,7 +36,7 @@ async def add_assumption_impl(
     logger.debug(f'Adding assumption: {description}')
     
     # Generate a simple ID based on the number of assumptions
-    assumption_id = f"A{len(assumptions) + 1:03d}"
+    assumption_id = next_id(assumptions, "A")
     
     # Create and store the assumption
     assumption = Assumption(

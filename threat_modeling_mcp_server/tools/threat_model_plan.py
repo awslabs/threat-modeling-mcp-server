@@ -6,38 +6,53 @@ from typing import Dict, List, Optional
 from loguru import logger
 from mcp.server.fastmcp import Context
 
-async def detect_code_in_directory(directory: str, file_patterns: Optional[List[str]] = None) -> bool:
-    """Detect if code files are present in the specified directory.
-    
+CODE_FILE_PATTERNS = [
+    # Common programming languages
+    "*.py", "*.js", "*.ts", "*.java", "*.cs", "*.go", "*.rb", "*.php", "*.html",
+    "*.css", "*.c", "*.cpp", "*.h", "*.hpp",
+    # Infrastructure as Code
+    "*.yaml", "*.yml", "*.json", "*.tf", "*.hcl", "*.cdk.ts", "*.cdk.js",
+    "*.cfn.yaml", "*.cfn.yml", "*.cfn.json",
+    # Database
+    "*.sql", "*.graphql", "*.gql",
+    # Configuration
+    "Dockerfile", "docker-compose.yml", "docker-compose.yaml", "*.config",
+    "*.xml", "*.toml", "*.ini",
+    # Shell scripts
+    "*.sh", "*.bash", "*.zsh", "*.ps1", "*.bat", "*.cmd",
+]
+
+
+def has_code_files(directory: str = ".", file_patterns: Optional[List[str]] = None) -> bool:
+    """Synchronously detect whether code files are present in a directory.
+
     Args:
         directory: Directory to check for code files
         file_patterns: Optional list of file patterns to look for
-        
+
     Returns:
         True if code files are detected, False otherwise
     """
-    if file_patterns is None:
-        file_patterns = [
-            # Common programming languages
-            "*.py", "*.js", "*.ts", "*.java", "*.cs", "*.go", "*.rb", "*.php", "*.html", "*.css", "*.c", "*.cpp", "*.h", "*.hpp",
-            # Infrastructure as Code
-            "*.yaml", "*.yml", "*.json", "*.tf", "*.hcl", "*.cdk.ts", "*.cdk.js", "*.cfn.yaml", "*.cfn.yml", "*.cfn.json",
-            # Database
-            "*.sql", "*.graphql", "*.gql",
-            # Configuration
-            "Dockerfile", "docker-compose.yml", "docker-compose.yaml", "*.config", "*.xml", "*.toml", "*.ini",
-            # Shell scripts
-            "*.sh", "*.bash", "*.zsh", "*.ps1", "*.bat", "*.cmd"
-        ]
-    
-    for pattern in file_patterns:
-        file_paths = glob.glob(os.path.join(directory, "**", pattern), recursive=True)
-        if file_paths:
-            logger.info(f"Detected code files matching pattern {pattern}: {len(file_paths)} files")
+    for pattern in file_patterns or CODE_FILE_PATTERNS:
+        if glob.glob(os.path.join(directory, "**", pattern), recursive=True):
+            logger.debug(f"Detected code files matching pattern {pattern}")
             return True
-    
-    logger.info("No code files detected in the directory")
+
+    logger.debug("No code files detected in the directory")
     return False
+
+
+async def detect_code_in_directory(directory: str, file_patterns: Optional[List[str]] = None) -> bool:
+    """Detect if code files are present in the specified directory.
+
+    Args:
+        directory: Directory to check for code files
+        file_patterns: Optional list of file patterns to look for
+
+    Returns:
+        True if code files are detected, False otherwise
+    """
+    return has_code_files(directory, file_patterns)
 
 
 async def generate_threat_modeling_plan(ctx: Context, directory: str = ".", auto_validate_code: bool = True) -> str:
@@ -45,13 +60,13 @@ async def generate_threat_modeling_plan(ctx: Context, directory: str = ".", auto
 
     This function returns a detailed threat modeling plan in markdown format,
     covering all phases of the threat modeling process. If code is detected in the
-    specified directory and auto_validate_code is True, it will automatically
-    run the threat model validation against the code.
+    specified directory and auto_validate_code is True, the plan includes the
+    conditional code-validation phase.
 
     Args:
         ctx: MCP context for logging and error handling
         directory: Directory to check for code files
-        auto_validate_code: Whether to automatically validate against code if detected
+        auto_validate_code: Whether to include code-validation guidance when code is detected
 
     Returns:
         A markdown-formatted threat modeling plan
@@ -136,26 +151,29 @@ FOR EVERY AWS SERVICE OR SECURITY RECOMMENDATION:
 
 ### Step-by-Step Process
 
-#### Step 1.1: Set Complete Business Context (Streamlined Approach)
-**Tool:** `set_business_context(description, industry_sector, data_sensitivity, user_base_size, geographic_scope, regulatory_requirements, system_criticality, financial_impact, authentication_requirement, deployment_environment, integration_complexity)`
-- **NEW**: Set business context description AND all features in one efficient call
-- Provide a comprehensive description of the system and its business purpose
-- Include all business context features directly as parameters (all optional except description)
-- Example: `set_business_context("Payment processing system for e-commerce", "Finance", "Confidential", "Large", "Global", "PCI-DSS", "High", "High", "MFA", "Cloud-Public", "Complex")`
+#### Step 1.1: Review Context Contracts as Needed
+**Tool:** `manage_system_context(action="describe", section=SECTION)`
+- Use `business`, `software`, `data_assets`, `user_personas`, or `nfrs` to load
+  only that section's fields and exact enum values
+- Use `section="all"` for the compact action and payload overview
 
-#### Step 1.2: Review Available Options (Optional)
-**Tools (for reference only):** 
-- `get_business_context_features()` - See all business context categories
-- `get_data_model_types(model_name="IndustrySector")` - Review industry options
-- `get_data_model_types(model_name="DataSensitivity")` - Review data sensitivity levels
-- `get_data_model_types(model_name="RegulatoryRequirement")` - Review compliance requirements
-- `get_data_model_types(model_name="SystemCriticality")` - Review criticality levels
+#### Step 1.2: Set Complete System Context
+**Tool:** `manage_system_context(action="set", section="all", values=CONTEXT)`
+- Submit one nested object with `business` and `software` objects plus
+  `data_assets`, `user_personas`, and `nfrs` arrays
+- The business object includes the description, all scalar features, and all four
+  geographic facets: `data_residency`, `compute_location`, `user_base_location`,
+  and `organizational_headquarters`
+- Payload shape: `values={"business": BUSINESS_VALUES, "software": SOFTWARE_VALUES, "data_assets": DATA_ASSET_ITEMS, "user_personas": PERSONA_ITEMS, "nfrs": NFR_ITEMS}`
 
-#### Step 1.3: Validate Business Context Completeness
-**Tool:** `validate_business_context_completeness()`
-- Validate that all required business context features have been set
-- Get clear feedback on any missing features
-- Ensure readiness to proceed to the next phase
+`get_data_model_types(model_name=...)` remains available when an individual enum
+needs to be inspected outside the system-context workflow.
+
+#### Step 1.3: Validate Context Completeness
+**Tool:** `manage_system_context(action="validate", section="all")`
+- Enforce the business-context completion gate
+- Report software, data asset, user persona, and NFR coverage
+- Resolve every missing business feature before advancing
 
 #### Step 1.4: Document Assumptions
 **Tool:** `add_assumption(description, category, impact, rationale)`
@@ -165,10 +183,10 @@ FOR EVERY AWS SERVICE OR SECURITY RECOMMENDATION:
   - "Peak load is 10x normal traffic during sales events" (affects availability requirements)
   - "Customer data retention is 7 years" (affects data lifecycle)
 
-#### Step 1.5: Review Complete Business Context
-**Tool:** `get_business_context()`
-- Review the complete business context generated from your setup
-- Ensure all critical business aspects are captured
+#### Step 1.5: Review Complete System Context
+**Tool:** `manage_system_context(action="get", section="all")`
+- Review business context and every classification profile
+- Ensure all critical business and classification fields are captured
 
 ### Expected Outputs
 - Complete business context with categorized features
@@ -259,13 +277,17 @@ FOR EVERY AWS SERVICE OR SECURITY RECOMMENDATION:
 - Review the comprehensive set of default threat actors
 - Understand their capabilities, motivations, and resources
 - Default actors include: Script Kiddies, Cybercriminals, Insider Threats, Nation-State Actors, etc.
+- These are a checklist to work through, not findings. An actor counts toward this phase only
+  once you assess it (Step 3.3 or 3.4) or add your own (Step 3.2). Actors left untouched are
+  excluded from the exported report and listed in its reference-catalogue appendix instead.
 
 #### Step 3.2: Add Custom Threat Actors
-**Tool:** `add_threat_actor(name, type, capability_level, motivations, resources, description)`
+**Tool:** `add_threat_actor(name, type, sophistication_tier, motivations, resources, relationship_to_target, state_nexus, targeting_specificity, description)`
 - Add threat actors specific to your business context
 - Examples:
-  - `add_threat_actor("Competitor", "External", "Medium", ["Espionage", "Disruption"], "Moderate", "Direct business competitor seeking advantage")`
-  - `add_threat_actor("Disgruntled Customer", "External", "Low", ["Revenge"], "Limited", "Customer upset about service issues")`
+  - `add_threat_actor(name="Competitor", type="Competitor / Corporate Espionage", sophistication_tier="Tier 3 - Organized cybercrime", motivations=["Competitive advantage", "Espionage / intelligence collection"], resources="Organization", relationship_to_target="External", targeting_specificity="Targeted", description="Direct business competitor seeking advantage")`
+  - `add_threat_actor(name="Disgruntled Customer", type="External Attacker", sophistication_tier="Tier 1 - Opportunistic / script kiddie", motivations=["Revenge / grievance"], resources="Individual", relationship_to_target="External", description="Customer upset about service issues")`
+- Use keyword arguments for clarity
 
 #### Step 3.3: Set Threat Actor Relevance
 **Tool:** `set_threat_actor_relevance(id, is_relevant)`
@@ -374,28 +396,23 @@ FOR EVERY AWS SERVICE OR SECURITY RECOMMENDATION:
 ### Step-by-Step Process
 
 #### Step 5.1: Identify and Add Assets
-**Tool:** `add_asset(name, type, classification, lifecycle_state, description, owner, sensitivity, criticality, metadata)`
+**Tool:** `add_asset(name, type, classification, lifecycle_state, data_states, description, owner, criticality, metadata)`
 - Identify all valuable assets in your system
 - Include data assets, credentials, and intellectual property
 - Examples:
-  - `add_asset("Credit Card Numbers", "Data", "Restricted", "Active", "Customer payment card data", "Payment Team", 5, 5)`
-  - `add_asset("User Passwords", "Credential", "Confidential", "Active", "User authentication credentials", "Security Team", 4, 4)`
-  - `add_asset("API Keys", "Credential", "Confidential", "Active", "Third-party service authentication", "DevOps Team", 3, 4)`
+  - `add_asset(name="Credit Card Numbers", type="Data", classification="Restricted", lifecycle_state="Active", data_states=["At rest", "In transit"], description="Customer payment card data", owner="Payment Team", criticality=5)`
+  - `add_asset(name="User Passwords", type="Credential", classification="Confidential", lifecycle_state="Active", data_states=["At rest"], description="User authentication credentials", owner="Security Team", criticality=4)`
+  - `add_asset(name="API Keys", type="Credential", classification="Confidential", lifecycle_state="Active", data_states=["At rest", "In use"], description="Third-party service authentication", owner="DevOps Team", criticality=4)`
+- Use keyword arguments: `data_states` was inserted after `lifecycle_state`
 
 #### Step 5.2: Map Asset Flows
 **Tool:** `add_flow(asset_id, source_id, destination_id, transformation_type, controls, description, protocol, encryption, authenticated, authorized, validated, risk_level)`
 - Document how assets move through the system
 - Include security controls and risk assessments
 - Examples:
-  - `add_flow("A001", "C001", "C002", "Encryption", ["TLS", "Input Validation"], "Credit card data from API to payment service", "HTTPS", True, True, True, True, 2)`
+  - `add_flow(asset_id="A001", source_id="C001", destination_id="C002", transformation_type="Encryption", controls=["Encryption", "Input Validation"], description="Credit card data from API to payment service", protocol="HTTPS", encryption=True, authenticated=True, authorized=True, validated=True, risk_level=2)`
 
-#### Step 5.3: Get Asset Flow Analysis Plan
-**Tool:** `get_asset_flow_analysis_plan()`
-- Get comprehensive plan for AI-powered asset flow analysis
-- Follow the plan to analyze flows for security concerns
-- Use AWS documentation validation for cloud-specific recommendations
-
-#### Step 5.4: Document Asset Flow Assumptions
+#### Step 5.3: Document Asset Flow Assumptions
 **Tool:** `add_assumption(description, category, impact, rationale)`
 - Document assumptions about asset protection and handling
 - Examples:
@@ -561,34 +578,32 @@ FOR EVERY AWS SERVICE OR SECURITY RECOMMENDATION:
 - Get detailed guidance for code validation analysis
 - Review objectives, steps, and expected outputs
 
-#### Step 7.5.2: Validate Security Controls in Code
-**Tool:** `validate_security_controls(directory, file_patterns)`
-- Analyze codebase for existing security controls
-- Identify implemented security measures
-- Document findings
+#### Step 7.5.2: Load the Finding Contract
+**Tool:** `manage_code_validation(action="describe")`
+- Review the accepted threat and mitigation outcomes
+- Use the project directory already recorded in Phase 1
 
-#### Step 7.5.3: Validate Threat Remediation
-**Tool:** `validate_threat_remediation(directory, file_patterns)`
-- Check which threats are already mitigated by code
-- Compare threat model against actual implementation
-- Generate remediation status report
+#### Step 7.5.3: Inspect and Record Evidence
+**Tool:** `manage_code_validation(action="record", values=FINDINGS)`
+- Inspect the relevant implementation paths yourself
+- Record concrete evidence for every current threat and mitigation
+- Status changes are applied atomically from the submitted outcomes
 
-#### Step 7.5.4: Generate Comprehensive Report
-**Tool:** `generate_remediation_report()`
-- Create detailed analysis of code security posture
-- Document gaps between threat model and implementation
-- Provide recommendations for improvements
+#### Step 7.5.4: Validate Coverage
+**Tool:** `manage_code_validation(action="validate")`
+- Resolve every missing or stale finding
+- Use `action="get"` to review current findings and progress
 
-#### Step 7.5.5: Update Threat Model Based on Findings
-- Review validation results and update threat statuses
-- Adjust mitigation priorities based on existing controls
-- Document code-based security assumptions using `add_assumption()`
+#### Step 7.5.5: Generate the Report
+**Tool:** `manage_code_validation(action="report")`
+- Render the deterministic evidence-based report
+- This finalizes the current snapshot and completes Phase 7.5
 
 ### Expected Outputs
-- Security control inventory from code analysis
-- Threat remediation status report
-- Gap analysis with recommendations
-- Updated threat model reflecting actual implementation
+- Evidence-backed findings for every current threat and mitigation
+- Explicit code-validation outcomes and matching canonical status updates
+- Complete, fresh coverage for the current project snapshot
+- Deterministic report with any recorded recommendations
 
 ---
 """
@@ -657,15 +672,10 @@ FOR EVERY AWS SERVICE OR SECURITY RECOMMENDATION:
 **Tool:** `export_comprehensive_threat_model(output_path)`
 - Export complete threat model with all global variables to JSON format
 - Include all components, threats, mitigations, business context, assumptions, and phase progress
+- Include current threat and mitigation statuses, including updates from code validation
 - Compatible with AWS Threat Composer and includes extended data
 
-#### Step 9.3: Export with Remediation Status
-**Tool:** `export_threat_model_with_remediation_status(output_path)`
-- Export threat model including code validation results
-- Show which threats are mitigated by existing code
-- Include remediation recommendations
-
-#### Step 9.4: Generate Summary Reports
+#### Step 9.3: Generate Summary Reports
 **Tools:** `get_threat_model_progress()`, `list_assumptions()`
 - Create executive summary of threat modeling process
 - Document key findings and recommendations
@@ -673,7 +683,7 @@ FOR EVERY AWS SERVICE OR SECURITY RECOMMENDATION:
 
 ### Expected Outputs
 - Threat Composer JSON export
-- Remediation status report
+- Threat and mitigation statuses captured in the JSON and Markdown exports
 - Executive summary document
 - Implementation recommendations
 
@@ -693,9 +703,9 @@ FOR EVERY AWS SERVICE OR SECURITY RECOMMENDATION:
 - ✅ Move to next phase guidance tool
 
 ### Critical Phases Requiring Extra Attention:
-- **Phase 7.5**: Use `validate_security_controls()` and `validate_threat_remediation()`
+- **Phase 7.5**: Use `manage_code_validation()` to load the finding contract, record implementation evidence for every threat and mitigation, validate coverage, and generate the report
 - **Phase 8**: Use `update_threat()` to set final threat statuses
-- **Phase 9**: Use `export_to_threat_composer()` for final output
+- **Phase 9**: Use `export_comprehensive_threat_model()` for final output
 
 ### Why Use Step-Specific Tools?
 - **Reliability**: No dependency on unimplemented orchestrator functions
@@ -725,13 +735,13 @@ def register_tools(mcp):
 
         This tool returns a detailed threat modeling plan in markdown format,
         covering all phases of the threat modeling process. If code is detected in the
-        specified directory, it will automatically run the threat model validation
-        against the code.
+        specified directory and auto_validate_code is true, it includes the
+        conditional code-validation phase.
 
         Args:
             ctx: MCP context for logging and error handling
             directory: Directory to check for code files (default: current directory)
-            auto_validate_code: Whether to automatically validate against code if detected (default: True)
+            auto_validate_code: Whether to include code-validation guidance when code is detected (default: True)
 
         Returns:
             A markdown-formatted threat modeling plan

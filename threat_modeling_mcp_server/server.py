@@ -12,7 +12,7 @@ from mcp.server.fastmcp import FastMCP
 # Import modules
 import threat_modeling_mcp_server.tools.threat_model_plan as threat_model_plan
 import threat_modeling_mcp_server.tools.assumption_manager as assumption_manager
-import threat_modeling_mcp_server.tools.business_context as business_context
+import threat_modeling_mcp_server.tools.system_context as system_context
 import threat_modeling_mcp_server.tools.architecture_analyzer as architecture_analyzer
 import threat_modeling_mcp_server.tools.threat_actor_analyzer as threat_actor_analyzer
 import threat_modeling_mcp_server.tools.trust_boundary_analyzer as trust_boundary_analyzer
@@ -21,7 +21,6 @@ import threat_modeling_mcp_server.tools.asset_flow_analyzer as asset_flow_analyz
 import threat_modeling_mcp_server.tools.threat_generator as threat_generator
 import threat_modeling_mcp_server.tools.data_model_types as data_model_types
 import threat_modeling_mcp_server.tools.code_security_validator as code_security_validator
-import threat_modeling_mcp_server.tools.threat_model_validator as threat_model_validator
 import threat_modeling_mcp_server.tools.step_orchestrator as step_orchestrator
 from threat_modeling_mcp_server.validation.instruction_validator import validate_instructions_against_tools, generate_tool_documentation
 
@@ -29,7 +28,7 @@ from threat_modeling_mcp_server.validation.instruction_validator import validate
 TOOL_MODULES = [
     threat_model_plan,
     assumption_manager,
-    business_context,
+    system_context,
     architecture_analyzer,
     threat_actor_analyzer,
     trust_boundary_analyzer,
@@ -38,7 +37,6 @@ TOOL_MODULES = [
     threat_generator,
     data_model_types,
     code_security_validator,
-    threat_model_validator,
     step_orchestrator,
 ]
 
@@ -65,15 +63,9 @@ SERVER_INSTRUCTIONS = """
     - `update_assumption`: Update an existing assumption
     - `delete_assumption`: Remove an assumption
 
-    ### Business Context Analysis
-    - `set_business_context`: Set business context description and features in one call
-    - `get_business_context`: Get the current business context
-    - `clear_business_context`: Clear the business context
-    - `validate_business_context_completeness`: Validate that all required business context features are set
-    - `get_business_context_features`: Get all business context features with descriptions
-    - `get_business_context_analysis_plan`: Get a plan to analyze business context using AI
-    - `get_data_model_types`: Get available types for any data model (replaces individual option tools)
-    
+    ### System Context
+    - `manage_system_context`: Describe, plan, set, get/list, add/update/delete, validate, and clear business context plus software, data asset, user persona, and NFR profiles
+
     ### Architecture Analysis
     - `add_component`: Add a new component to the architecture
     - `update_component`: Update an existing component
@@ -139,9 +131,7 @@ SERVER_INSTRUCTIONS = """
     - `list_flows`: List all asset flows
     - `get_flow`: Get details about a specific asset flow
     - `delete_flow`: Delete an asset flow
-    - `get_asset_flow_analysis_plan`: Get a plan to analyze asset flows for security concerns
     - `clear_asset_flows`: Clear all assets and flows
-    - `reset_asset_flows`: Reset assets and flows to the default set
     
     ### Threat Generator
     - `add_threat`: Add a new threat to the model
@@ -164,14 +154,8 @@ SERVER_INSTRUCTIONS = """
     - `get_data_model_types`: Get available types for a data model
     - `list_data_models`: List all available data models
     
-    ### Code Security Validation
-    - `validate_security_controls`: Validate security controls in code
-    - `validate_threat_remediation`: Validate if threats are remediated in code
-    - `generate_remediation_report`: Generate a comprehensive remediation report
-    
-    ### Threat Model Validation
-    - `validate_threat_model_against_code`: Validate the threat model against the actual codebase
-    - `export_threat_model_with_remediation_status`: Export the threat model with remediation status
+    ### Code Validation
+    - `manage_code_validation`: Describe, record, inspect, validate, report, or clear evidence-based Phase 7.5 findings
     
     ### Step Orchestrator
     - `get_phase_1_guidance`: Get detailed guidance for Phase 1: Business Context Analysis
@@ -184,10 +168,10 @@ SERVER_INSTRUCTIONS = """
     - `get_phase_7_5_guidance`: Get detailed guidance for Phase 7.5: Code Validation Analysis
     - `get_phase_8_guidance`: Get detailed guidance for Phase 8: Residual Risk Analysis
     - `get_phase_9_guidance`: Get detailed guidance for Phase 9: Output Generation and Documentation
-    - `execute_code_validation_step`: Execute the complete code validation step (Phase 7.5) automatically
     - `execute_final_export_step`: Execute the complete final export step (Phase 9) automatically
     - `get_current_phase_status`: Get the current phase status and completion progress
     - `follow_threat_modeling_plan`: Get step-by-step guidance for the current threat modeling phase
+    - `set_project_directory_tool`: Record which directory holds the project under review (decides whether phase 7.5 applies)
     - `advance_phase`: Advance to the next phase of the threat modeling process
     - `get_threat_model_progress`: Get the current progress of the threat modeling process
     """

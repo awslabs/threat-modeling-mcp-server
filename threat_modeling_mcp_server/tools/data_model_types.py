@@ -15,6 +15,10 @@ import threat_modeling_mcp_server.models.threat_actor_models as threat_actor_mod
 import threat_modeling_mcp_server.models.trust_boundary_models as trust_boundary_models
 import threat_modeling_mcp_server.models.threat_models as threat_models
 import threat_modeling_mcp_server.models.models as models
+import threat_modeling_mcp_server.models.software_models as software_models
+import threat_modeling_mcp_server.models.data_classification_models as data_classification_models
+import threat_modeling_mcp_server.models.user_models as user_models
+import threat_modeling_mcp_server.models.nfr_models as nfr_models
 
 
 def discover_enum_classes() -> Dict[str, Type[Enum]]:
@@ -29,7 +33,11 @@ def discover_enum_classes() -> Dict[str, Type[Enum]]:
         threat_actor_models,
         trust_boundary_models,
         threat_models,
-        models
+        models,
+        software_models,
+        data_classification_models,
+        user_models,
+        nfr_models,
     ]
     
     enum_classes = {}
@@ -94,10 +102,10 @@ async def list_data_models_impl(
     logger.debug('Listing all data models')
     
     result = "# Available Data Models\n\n"
-    
-    for model_name in DATA_MODELS.keys():
+
+    for model_name in sorted(DATA_MODELS):
         result += f"- {model_name}\n"
-    
+
     return result
 
 

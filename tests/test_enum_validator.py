@@ -9,6 +9,11 @@ from threat_modeling_mcp_server.validation.enum_validator import (
     get_current_enum_values,
     discover_enum_classes_fresh,
 )
+from threat_modeling_mcp_server.models.data_classification_models import (
+    InformationContentType,
+)
+from threat_modeling_mcp_server.models.models import RegulatoryRequirement
+from threat_modeling_mcp_server.models.threat_actor_models import ThreatActorType
 
 
 class SampleEnum(str, Enum):
@@ -69,6 +74,45 @@ class TestValidateEnumWithEnhancedError:
         assert "SampleEnum" in str(exc_info.value)
 
 
+class TestCanonicalCombinedLabels:
+    """Slash-delimited taxonomy labels must be supplied in full."""
+
+    @pytest.mark.parametrize(("supplied", "enum_class"), [
+        ("CPRA", RegulatoryRequirement),
+        ("APT", ThreatActorType),
+        ("financial data", InformationContentType),
+        ("other", RegulatoryRequirement),
+    ])
+    def test_component_of_a_combined_label_is_rejected(
+        self, supplied, enum_class,
+    ):
+        with pytest.raises(ValueError) as exc:
+            validate_enum_with_enhanced_error(
+                supplied, enum_class, "taxonomy_value",
+            )
+
+        message = str(exc.value)
+        assert supplied in message
+        assert "Valid options are" in message
+        assert "taxonomy_value" in message
+
+    def test_exact_and_case_insensitive_full_labels_are_accepted(self):
+        assert validate_enum_with_enhanced_error(
+            "CCPA / CPRA", RegulatoryRequirement,
+        ) is RegulatoryRequirement.CCPA
+        assert validate_enum_with_enhanced_error(
+            "ccpa / cpra", RegulatoryRequirement,
+        ) is RegulatoryRequirement.CCPA
+
+    def test_unrelated_value_lists_valid_options(self):
+        with pytest.raises(ValueError) as exc:
+            validate_enum_with_enhanced_error(
+                "SOC2", RegulatoryRequirement, "compliance_regimes",
+            )
+        assert "Valid options are" in str(exc.value)
+        assert "PCI-DSS" in str(exc.value)
+
+
 class TestCreateEnhancedEnumError:
     """Tests for create_enhanced_enum_error function."""
 
@@ -111,6 +155,18 @@ class TestDiscoverEnumClassesFresh:
         enums = discover_enum_classes_fresh()
         for name, enum_class in enums.items():
             assert issubclass(enum_class, Enum), f"{name} is not an Enum subclass"
+
+
+    def test_discovers_classification_profile_enums_without_duplicates(self):
+        """Both registries expose every profile enum exactly once."""
+        from threat_modeling_mcp_server.tools.data_model_types import DATA_MODELS
+
+        fresh = discover_enum_classes_fresh()
+        for name in ("SoftwareType", "DataStructuralCategory", "UserPersonaType",
+                     "QualityClass"):
+            assert name in DATA_MODELS
+            assert name in fresh
+        assert len(DATA_MODELS) == len(set(DATA_MODELS.values()))
 
 
 class TestGetCurrentEnumValues:

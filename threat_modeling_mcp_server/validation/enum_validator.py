@@ -21,6 +21,10 @@ def discover_enum_classes_fresh():
     import threat_modeling_mcp_server.models.trust_boundary_models as trust_boundary_models
     import threat_modeling_mcp_server.models.threat_models as threat_models
     import threat_modeling_mcp_server.models.models as models
+    import threat_modeling_mcp_server.models.software_models as software_models
+    import threat_modeling_mcp_server.models.data_classification_models as data_classification_models
+    import threat_modeling_mcp_server.models.user_models as user_models
+    import threat_modeling_mcp_server.models.nfr_models as nfr_models
     
     modules = [
         architecture_models,
@@ -28,6 +32,10 @@ def discover_enum_classes_fresh():
         threat_actor_models,
         trust_boundary_models,
         threat_models,
+        software_models,
+        data_classification_models,
+        user_models,
+        nfr_models,
         models
     ]
     
@@ -158,7 +166,7 @@ def validate_enum_with_enhanced_error(value, enum_class: Type[Enum], field_name:
             if enum_value.lower() == value_lower:
                 logger.info(f"Enum value '{value}' matched to '{enum_member.value}' (case-insensitive) for {enum_class.__name__}")
                 return enum_member
-    
+
     # Create enhanced error message with all valid options
     valid_options_str = ', '.join(f'"{v}"' for v in valid_values.keys())
     error_msg = f"'{value}' is not a valid {enum_class.__name__}. Valid options are: {valid_options_str}"

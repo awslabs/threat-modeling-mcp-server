@@ -9,11 +9,9 @@ import os
 
 from threat_modeling_mcp_server.models.threat_models import (
     Threat, Mitigation, ThreatCategory, ThreatSeverity, ThreatLikelihood,
-    AttackVector, AttackComplexity, ThreatStatus, MitigationType, MitigationStatus,
-    MitigationCost, MitigationEffectiveness, MetadataItem, AssumptionLink, MitigationLink,
-    ThreatModel, ThreatLibrary, MitigationLibrary
+    ThreatStatus, MitigationType, MitigationStatus, MitigationCost,
+    MitigationEffectiveness, MetadataItem, MitigationLink,
 )
-from threat_modeling_mcp_server.tools.assumption_manager import assumptions
 from threat_modeling_mcp_server.utils.file_utils import normalize_output_path
 from threat_modeling_mcp_server.utils.batch_utils import batch_add, batch_update, batch_delete
 
@@ -21,7 +19,6 @@ from threat_modeling_mcp_server.utils.batch_utils import batch_add, batch_update
 # Global dictionaries to store threats and mitigations
 threats: Dict[str, Threat] = {}
 mitigations: Dict[str, Mitigation] = {}
-assumption_links: List[AssumptionLink] = []
 mitigation_links: List[MitigationLink] = []
 
 # Counter for numeric IDs
@@ -202,6 +199,7 @@ async def list_threats_impl(
     
     for threat in sorted_threats:
         result += f"## {threat.numericId}: {threat.statement}\n\n"
+        result += f"**ID:** {threat.id}\n\n"
         
         if threat.category:
             result += f"**Category:** {threat.category.value}\n\n"
@@ -240,16 +238,6 @@ async def list_threats_impl(
                 if mitigation_id in mitigations:
                     mitigation = mitigations[mitigation_id]
                     result += f"- {mitigation.content} ({mitigation_id})\n"
-            result += "\n"
-        
-        # Get linked assumptions
-        linked_assumptions = [link.assumptionId for link in assumption_links if link.linkedId == threat.id]
-        if linked_assumptions:
-            result += "**Assumptions:**\n\n"
-            for assumption_id in linked_assumptions:
-                if assumption_id in assumptions:
-                    assumption = assumptions[assumption_id]
-                    result += f"- {assumption.description} ({assumption_id})\n"
             result += "\n"
         
         result += "---\n\n"
@@ -319,16 +307,6 @@ async def get_threat_impl(
                 result += f"- {mitigation.content} ({mitigation_id})\n"
         result += "\n"
     
-    # Get linked assumptions
-    linked_assumptions = [link.assumptionId for link in assumption_links if link.linkedId == threat.id]
-    if linked_assumptions:
-        result += "**Assumptions:**\n\n"
-        for assumption_id in linked_assumptions:
-            if assumption_id in assumptions:
-                assumption = assumptions[assumption_id]
-                result += f"- {assumption.description} ({assumption_id})\n"
-        result += "\n"
-    
     return result
 
 
@@ -347,8 +325,7 @@ async def delete_threat_impl(
     del threats[id]
     
     # Delete any links to this threat
-    global assumption_links, mitigation_links
-    assumption_links = [link for link in assumption_links if link.linkedId != id]
+    global mitigation_links
     mitigation_links = [link for link in mitigation_links if link.linkedId != id]
     
     return f"Threat {id} deleted successfully"

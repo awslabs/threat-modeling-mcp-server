@@ -29,8 +29,7 @@ from threat_modeling_mcp_server.tools.trust_boundary_analyzer import (
     add_trust_zone_impl, update_trust_zone_impl, delete_trust_zone_impl,
     add_crossing_point_impl, delete_crossing_point_impl,
     add_trust_boundary_impl, delete_trust_boundary_impl,
-    trust_zones, crossing_points, trust_boundaries,
-    initialize_trust_boundaries
+    trust_zones, crossing_points, trust_boundaries
 )
 from threat_modeling_mcp_server.utils.batch_utils import batch_add, batch_update, batch_delete
 
@@ -259,8 +258,6 @@ class TestBatchAssets:
 class TestBatchTrustZones:
     async def test_batch_add_trust_zones(self, ctx):
         import threat_modeling_mcp_server.tools.trust_boundary_analyzer as tba
-        # initialize so the global is set
-        tba.initialize_trust_boundaries()
         initial_count = len(tba.trust_zones)
         items = [
             {"name": "Public Zone", "trust_level": "Untrusted"},
@@ -272,11 +269,8 @@ class TestBatchTrustZones:
 
     async def test_batch_delete_trust_zones(self, ctx):
         import threat_modeling_mcp_server.tools.trust_boundary_analyzer as tba
-        tba.initialize_trust_boundaries()
-        # Add two fresh zones we control
         await add_trust_zone_impl(ctx, "Zone A", "Untrusted")
         await add_trust_zone_impl(ctx, "Zone B", "High")
-        # Get the last two IDs added
         all_ids = list(tba.trust_zones.keys())
         new_ids = all_ids[-2:]
         result = await batch_delete(ctx, new_ids, None, delete_trust_zone_impl, "trust zone")

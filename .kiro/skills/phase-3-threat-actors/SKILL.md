@@ -10,20 +10,26 @@ Identify who might attack this system, what motivates them, and what they're cap
 
 ## Default Threat Actors
 
-The system pre-loads 10 default threat actors (TA001-TA010):
+The system pre-loads 12 default threat actors (TA001-TA012) as a **starting point, not
+as findings**. An actor counts toward this phase only once you have assessed it -- set
+its relevance, set its priority, or update it. Actors you never touch stay out of the
+report's threat actor section and are listed in its "Appendix: Reference Catalogue (Not
+Reviewed)" instead, so leaving the catalogue untouched cannot pass for analysis.
 
-| ID | Name | Type | Capability | Motivations |
+| ID | Name | Type | Sophistication Tier | Motivations |
 |---|---|---|---|---|
-| TA001 | Insider | Insider | Medium | Financial, Revenge |
-| TA002 | External Attacker | External | Medium | Financial |
-| TA003 | Nation-state Actor | Nation-state | High | Espionage, Political |
-| TA004 | Hacktivist | Hacktivist | Medium | Ideology, Political |
-| TA005 | Organized Crime | Organized Crime | High | Financial |
-| TA006 | Competitor | Competitor | Medium | Financial, Espionage |
-| TA007 | Script Kiddie | Script Kiddie | Low | Curiosity, Reputation |
-| TA008 | Disgruntled Employee | Disgruntled Employee | Medium | Revenge |
-| TA009 | Privileged User | Privileged User | High | Financial, Accidental |
-| TA010 | Third Party | Third Party | Medium | Financial, Accidental |
+| TA001 | Insider | Insider Threat | Tier 2 - Hacktivist / campaign-driven | Financial gain, Revenge / grievance |
+| TA002 | External Attacker | External Attacker | Tier 1 - Opportunistic / script kiddie | Financial gain |
+| TA003 | Nation-state Actor | Nation-State / APT | Tier 5 - Nation-state APT / elite | Espionage / intelligence collection |
+| TA004 | Hacktivist | Hacktivist | Tier 2 - Hacktivist / campaign-driven | Ideological / hacktivism |
+| TA005 | Organized Crime | Financially Motivated Cybercriminal / Organized Crime | Tier 3 - Organized cybercrime | Financial gain |
+| TA006 | Competitor | Competitor / Corporate Espionage | Tier 3 - Organized cybercrime | Competitive advantage, Espionage / intelligence collection |
+| TA007 | Script Kiddie | Script Kiddie / Novice | Tier 1 - Opportunistic / script kiddie | Thrill-seeking / notoriety |
+| TA008 | Disgruntled Employee | Disgruntled Employee | Tier 1 - Opportunistic / script kiddie | Revenge / grievance |
+| TA009 | Privileged User | Privileged User | Tier 2 - Hacktivist / campaign-driven | Financial gain |
+| TA010 | Third Party | Third Party | Tier 2 - Hacktivist / campaign-driven | Financial gain |
+| TA011 | Terrorist Organization | Terrorist Organization | Tier 2 - Hacktivist / campaign-driven | Ideological / hacktivism, Disruption / destruction |
+| TA012 | Private Sector Offensive Actor | Private Sector Offensive Actor / Cyber Mercenary | Tier 4 - State-nexus / advanced | Financial gain |
 
 ## Tools Reference
 
@@ -33,13 +39,17 @@ Mark whether a threat actor applies to this system. Set `is_relevant=false` for 
 ### set_threat_actor_priority(id, priority)
 Rank from 1 (highest threat) to 10 (lowest). Consider both likelihood and potential impact.
 
-### add_threat_actor(name, type, capability_level, motivations, resources, description)
+### add_threat_actor(name, type, sophistication_tier, motivations, resources, relationship_to_target, state_nexus, targeting_specificity, description)
+Use keyword arguments: the taxonomy dimensions sit between `resources` and `description`.
 | Parameter | Values |
 |---|---|
-| type | Insider, External, Nation-state, Hacktivist, Organized Crime, Competitor, Script Kiddie, Disgruntled Employee, Privileged User, Third Party, Other |
-| capability_level | Low, Medium, High |
-| motivations | List of: Financial, Political, Espionage, Reputation, Revenge, Ideology, Curiosity, Accidental, Disruption, Other |
-| resources | Limited, Moderate, Extensive |
+| type | Nation-State / APT, Financially Motivated Cybercriminal / Organized Crime, Hacktivist, Insider Threat, Terrorist Organization, Private Sector Offensive Actor / Cyber Mercenary, Script Kiddie / Novice, Competitor / Corporate Espionage, External Attacker, Disgruntled Employee, Privileged User, Third Party, Other |
+| motivations | List of: Financial gain, Espionage / intelligence collection, Ideological / hacktivism, Disruption / destruction, Competitive advantage, Thrill-seeking / notoriety, Revenge / grievance |
+| resources | Individual, Club / small group, Contest / crowd, Team, Organization, Government |
+| relationship_to_target | External, Internal, Partner / third-party |
+| sophistication_tier | Tier 1 - Opportunistic / script kiddie, Tier 2 - Hacktivist / campaign-driven, Tier 3 - Organized cybercrime, Tier 4 - State-nexus / advanced, Tier 5 - Nation-state APT / elite |
+| state_nexus | None, State-aligned, State-sponsored, State-executed |
+| targeting_specificity | Opportunistic, Sector-focused, Targeted |
 
 ### Other Phase 3 Tools
 - `list_threat_actors()` -- Review all actors
@@ -69,7 +79,8 @@ Rank from 1 (highest threat) to 10 (lowest). Consider both likelihood and potent
 7. **Document assumptions** about threat actor exclusions
 
 ## Completion Criteria
-- [ ] All default actors reviewed for relevance
+- [ ] All default actors reviewed for relevance (the phase gate needs at least one
+      assessed actor; anything left untouched shows up in the report's appendix)
 - [ ] Priorities set for all relevant actors
 - [ ] Custom actors added if applicable
 - [ ] `analyze_threat_actors()` completed

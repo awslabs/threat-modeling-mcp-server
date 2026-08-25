@@ -15,14 +15,10 @@ from threat_modeling_mcp_server.models.threat_models import (
     MitigationCost,
     MitigationEffectiveness,
     MetadataItem,
-    AssumptionLink,
     MitigationLink,
     ThreatModel,
-    ThreatLibrary,
-    MitigationLibrary,
-    AttackVector,
-    AttackComplexity,
 )
+from threat_modeling_mcp_server.models.models import SensitivityTier
 from threat_modeling_mcp_server.models.architecture_models import (
     Component,
     Connection,
@@ -32,7 +28,6 @@ from threat_modeling_mcp_server.models.architecture_models import (
     ServiceProvider,
     Protocol,
     DataStoreType,
-    DataClassification,
     BackupFrequency,
 )
 
@@ -72,8 +67,6 @@ class TestThreatModel:
             category="Tampering",
             severity="High",
             likelihood="Likely",
-            attack_vector="Network",
-            attack_complexity="Low",
             affected_components=["comp1", "comp2"],
             impactedAssets=["asset1"],
             tags=["sql", "injection"],
@@ -81,8 +74,6 @@ class TestThreatModel:
         assert threat.category == ThreatCategory.TAMPERING
         assert threat.severity == ThreatSeverity.HIGH
         assert threat.likelihood == ThreatLikelihood.LIKELY
-        assert threat.attack_vector == AttackVector.NETWORK
-        assert threat.attack_complexity == AttackComplexity.LOW
         assert "comp1" in threat.affected_components
         assert "sql" in threat.tags
 
@@ -223,19 +214,8 @@ class TestMetadataItem:
         assert item.value == "high"
 
 
-class TestLinkModels:
-    """Tests for AssumptionLink and MitigationLink models."""
-
-    def test_create_assumption_link(self):
-        """Test creating an assumption link."""
-        link = AssumptionLink(
-            linkedId="T1",
-            assumptionId="A1",
-            type="Threat",
-        )
-        assert link.linkedId == "T1"
-        assert link.assumptionId == "A1"
-        assert link.type == "Threat"
+class TestMitigationLink:
+    """Tests for the MitigationLink model."""
 
     def test_create_mitigation_link(self):
         """Test creating a mitigation link."""
@@ -374,7 +354,7 @@ class TestDataStoreModel:
         )
         assert data_store.id == "DS1"
         assert data_store.type == DataStoreType.RELATIONAL
-        assert data_store.classification == DataClassification.CONFIDENTIAL
+        assert data_store.classification == SensitivityTier.CONFIDENTIAL
         assert data_store.encryption_at_rest is False
 
     def test_create_data_store_with_all_fields(self):
@@ -389,7 +369,7 @@ class TestDataStoreModel:
             description="Data warehouse for analytics",
         )
         assert data_store.type == DataStoreType.DATA_WAREHOUSE
-        assert data_store.classification == DataClassification.RESTRICTED
+        assert data_store.classification == SensitivityTier.RESTRICTED
         assert data_store.backup_frequency == BackupFrequency.DAILY
         assert data_store.encryption_at_rest is True
 
@@ -402,7 +382,7 @@ class TestDataStoreModel:
             classification="internal",
         )
         assert data_store.type == DataStoreType.CACHE
-        assert data_store.classification == DataClassification.INTERNAL
+        assert data_store.classification == SensitivityTier.INTERNAL
 
 
 class TestArchitectureModel:
@@ -425,65 +405,6 @@ class TestArchitectureModel:
         )
         assert len(arch.components) == 1
         assert arch.description == "Test architecture"
-
-
-class TestThreatLibrary:
-    """Tests for the ThreatLibrary class."""
-
-    def test_get_common_threats_returns_dict(self):
-        """Test that get_common_threats returns a dictionary."""
-        threats = ThreatLibrary.get_common_threats()
-        assert isinstance(threats, dict)
-        assert len(threats) > 0
-
-    def test_common_threats_has_authentication_category(self):
-        """Test that common threats include authentication category."""
-        threats = ThreatLibrary.get_common_threats()
-        assert "authentication" in threats
-
-    def test_common_threats_has_sql_injection(self):
-        """Test that common threats include SQL injection."""
-        threats = ThreatLibrary.get_common_threats()
-        assert "data_validation" in threats
-        assert "sql_injection" in threats["data_validation"]
-
-    def test_threat_entries_have_required_fields(self):
-        """Test that threat entries have required fields."""
-        threats = ThreatLibrary.get_common_threats()
-        sql_injection = threats["data_validation"]["sql_injection"]
-        assert "source" in sql_injection
-        assert "action" in sql_injection
-        assert "impact" in sql_injection
-        assert "category" in sql_injection
-
-
-class TestMitigationLibrary:
-    """Tests for the MitigationLibrary class."""
-
-    def test_get_common_mitigations_returns_dict(self):
-        """Test that get_common_mitigations returns a dictionary."""
-        mitigations = MitigationLibrary.get_common_mitigations()
-        assert isinstance(mitigations, dict)
-        assert len(mitigations) > 0
-
-    def test_common_mitigations_has_authentication_category(self):
-        """Test that common mitigations include authentication category."""
-        mitigations = MitigationLibrary.get_common_mitigations()
-        assert "authentication" in mitigations
-
-    def test_common_mitigations_has_mfa(self):
-        """Test that common mitigations include MFA."""
-        mitigations = MitigationLibrary.get_common_mitigations()
-        assert "mfa" in mitigations["authentication"]
-
-    def test_mitigation_entries_have_required_fields(self):
-        """Test that mitigation entries have required fields."""
-        mitigations = MitigationLibrary.get_common_mitigations()
-        mfa = mitigations["authentication"]["mfa"]
-        assert "content" in mfa
-        assert "type" in mfa
-        assert "cost" in mfa
-        assert "effectiveness" in mfa
 
 
 class TestEnumValues:

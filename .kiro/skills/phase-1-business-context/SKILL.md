@@ -10,65 +10,102 @@ Understand what the system does, who it serves, and what's at stake if it's comp
 
 ## Tools Reference
 
-### set_business_context (primary tool)
-Sets description AND all business features in one call.
+### manage_system_context (primary tool)
+This single tool manages business context plus software, data asset, user persona,
+and NFR profiles. Call `action="describe"` for a section before writing it when
+you need its exact fields and enum values. Use `action="set", section="all"` to
+submit the complete Phase 1 context in one nested payload.
 
-**Parameters**:
+The business fields below live inside `values["business"]`. All are required for
+`action="validate", section="all"` to return PASSED for business context.
+
 | Parameter | Required | Values |
 |---|---|---|
 | description | Yes | Free text describing the system |
-| industry_sector | No | Finance, Healthcare, Retail, Technology, Manufacturing, Government, Education, Energy, Transportation, Other |
-| data_sensitivity | No | Public, Internal, Confidential, Restricted, Regulated |
-| user_base_size | No | Small (<1K), Medium (1K-100K), Large (100K-1M), Enterprise (>1M) |
-| geographic_scope | No | Local, Regional, National, Multinational, Global |
-| regulatory_requirements | No | GDPR, HIPAA, PCI-DSS, SOX, FISMA, CCPA, None, Multiple (comma-separated) |
-| system_criticality | No | Low (down for days), Medium (up within hours), High (up within minutes), Mission-Critical (cannot be down) |
-| financial_impact | No | Minimal (<$10K), Low ($10K-$100K), Medium ($100K-$1M), High ($1M-$10M), Severe (>$10M) |
-| authentication_requirement | No | None, Basic, MFA, Federated, Biometric |
-| deployment_environment | No | On-Premises, Cloud-Public, Cloud-Private, Hybrid, Multi-Cloud |
-| integration_complexity | No | Standalone, Limited, Moderate, Complex, Highly Complex |
+| industry_sector | Yes | Finance, Healthcare, Retail, Technology, Manufacturing, Government, Education, Energy, Transportation, Other |
+| sensitivity_tier | Yes | Public, Internal, Confidential, Restricted |
+| user_base_size | Yes | Nano (<100), Micro (100-1K), Small (1K-100K), Medium (100K-10M), Large (10M-100M), Very Large (100M-1B), Hyper-Scale (>1B) |
+| geographic_scope | Yes | Sub-National / Local, National / Single-Country, Regional / Multi-Country Bloc, Continental / Macro-Regional, Multi-Continental / International, Global / Transboundary |
+| regulatory_requirements | Yes | GDPR, CCPA / CPRA, HIPAA, PCI-DSS, SOX, FISMA / FedRAMP, None, Multiple / other (comma-separated) |
+| system_criticality | Yes | Low (down for days), Medium (up within hours), High (up within minutes), Mission-Critical (cannot be down) |
+| financial_impact | Yes | Percent of annual revenue: Negligible (<0.001%), Low (0.001-0.01%), Moderate (0.01-0.1%), High (0.1-1%), Critical (>1%) |
+| authentication_requirement | Yes | None, Basic, MFA, Federated, Biometric |
+| deployment_model | Yes | On-premises, IaaS, PaaS, SaaS, Serverless / FaaS, Hybrid cloud, Multi-cloud, Edge |
+| user_base_metric | Yes | Monthly Active Users, Daily Active Users, Concurrent Users, Seats / licenses, Organizational customers, Installs / downloads, Registered users |
+| revenue_band | Yes | Small business, Mid-market, Enterprise |
+| data_residency | Yes | Geographic scope level where data is stored (all four facets are required together) |
+| compute_location | Yes | Geographic scope level where processing happens |
+| user_base_location | Yes | Geographic scope level of the end users |
+| organizational_headquarters | Yes | Geographic scope level of the controlling entity |
+
+The 11 scalar features plus the four geographic facets (counted together as
+`geographic_profile`) make up the 12 features the completeness check requires.
 
 **Example**:
-```
-set_business_context(
-  description="Payment processing microservice handling credit card transactions for an e-commerce platform",
-  industry_sector="Finance",
-  data_sensitivity="Restricted",
-  user_base_size="Large",
-  geographic_scope="Global",
-  regulatory_requirements="PCI-DSS,GDPR",
-  system_criticality="High",
-  financial_impact="High",
-  authentication_requirement="MFA",
-  deployment_environment="Cloud-Public",
-  integration_complexity="Complex"
+```python
+manage_system_context(
+  action="set",
+  section="all",
+  values={
+    "business": {
+      "description": "Payment processing service for an e-commerce platform",
+      "industry_sector": "Finance",
+      "sensitivity_tier": "Restricted",
+      "user_base_size": "Large",
+      "geographic_scope": "Global / Transboundary",
+      "regulatory_requirements": ["PCI-DSS", "GDPR"],
+      "system_criticality": "High",
+      "financial_impact": "High",
+      "authentication_requirement": "MFA",
+      "deployment_model": "PaaS",
+      "user_base_metric": "Monthly Active Users",
+      "revenue_band": "Mid-market",
+      "data_residency": "National / Single-Country",
+      "compute_location": "Regional / Multi-Country Bloc",
+      "user_base_location": "Global / Transboundary",
+      "organizational_headquarters": "National / Single-Country"
+    },
+    "software": {"software_type": "API Service", "deployment_model": "PaaS"},
+    "data_assets": [{"name": "Cardholder data", "structural_category": "Structured Data", "sensitivity_tier": "Restricted"}],
+    "user_personas": [{"name": "Customer", "persona_type": "Authenticated Standard User"}],
+    "nfrs": [{"quality_class": "Availability", "level": "99.9%"}]
+  }
 )
 ```
 
 ### Other Phase 1 Tools
-- `validate_business_context_completeness()` -- Checks all 10 features are set. Must return PASSED.
-- `get_business_context()` -- Review what's been set
-- `get_business_context_features()` -- List all available features and descriptions
-- `get_business_context_analysis_plan()` -- Get AI-powered analysis guidance
+- `manage_system_context(action="describe", section=SECTION)` -- Exact fields and enum values on demand
+- `manage_system_context(action="get", section="all")` -- Review business context and every profile
+- `manage_system_context(action="plan", section="business")` -- Get detailed business-analysis guidance
+- `manage_system_context(action="validate", section="all")` -- Check the business gate and report profile coverage
+- `manage_system_context(action="clear", section=SECTION)` -- Clear one section or all context
+- `set_project_directory_tool(directory)` -- Record the project path used to decide whether Phase 7.5 applies
 - `add_assumption(description, category, impact, rationale)` -- Document scope decisions
+
+The `software`, `data_assets`, `user_personas`, and `nfrs` sections hold the
+classification profiles. They are required by the agent workflow, but they are
+not inputs to the server's Phase 1 completion gate.
 
 ## Workflow
 
-1. **Read the codebase**: Examine README, config files, package.json/pyproject.toml, infrastructure code
-2. **Determine business context**: What does the system do? Who uses it? What data does it handle?
-3. **Call `set_business_context()`** with ALL parameters filled
-4. **Call `validate_business_context_completeness()`** -- must pass before proceeding
-5. **Document assumptions** with `add_assumption()` for any scope decisions:
-   - "System only operates in North America" (limits regulatory scope)
+1. **Record the project path** with `set_project_directory_tool(directory=PROJECT_DIRECTORY)`
+2. **Read the codebase**: Examine README, config files, package manifests, and infrastructure code
+3. **Determine context**: What does the system do, who uses it, and what data does it handle?
+4. **Describe sections as needed** with `manage_system_context(action="describe", section=SECTION)`
+5. **Set the complete context once** with `action="set", section="all"`
+6. **Validate** with `action="validate", section="all"`; business context must pass
+7. **Document assumptions** with `add_assumption()` for scope decisions such as regional limits or peak-load expectations
    - "Peak load is 10x normal during sales events" (affects availability)
 
 ## Completion Criteria
-- [ ] `validate_business_context_completeness()` returns PASSED
-- [ ] All 10 business features set (not just description)
+- [ ] `manage_system_context(action="validate", section="all")` returns PASSED for business context
+- [ ] All 12 required business features set, including all four geographic facets
+- [ ] Project directory recorded
+- [ ] Software, known data asset, user persona, and relevant NFR profiles recorded
 - [ ] Key assumptions documented
 - [ ] Call `advance_phase()` to proceed to Phase 2
 
 ## Common Pitfalls
-- Setting only the description without the 10 features
+- Setting only the description without the 12 required features
 - Guessing regulatory requirements without analyzing the data types
 - Not documenting assumptions that limit scope

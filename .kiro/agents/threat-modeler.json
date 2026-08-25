@@ -1,6 +1,6 @@
 {
   "name": "threat-modeler",
-  "description": "Specialized agent for systematic threat modeling using STRIDE methodology. Conducts 9-phase security analysis with automatic code validation and Threat Composer export.",
+  "description": "Specialized agent for systematic threat modeling using STRIDE methodology. Conducts 9-phase security analysis with guided code validation and Threat Composer export.",
   "prompt": "file://../prompts/threat-modeler.md",
   "mcpServers": {
     "threat-modeling-mcp-server": {

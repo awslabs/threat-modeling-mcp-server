@@ -181,8 +181,6 @@ async def add_data_asset_profile_impl(
     description: Optional[str] = None,
 ) -> str:
     """Classify a data asset across the eight Data Classification dimensions."""
-    global data_asset_profiles
-
     logger.debug(f"Adding data asset profile: {structural_category}")
 
     # The tool exposes this with a None default so the batch 'items' path can be
@@ -357,8 +355,6 @@ async def delete_user_persona_impl(ctx: Context, id: str) -> str:
 
 async def delete_nfr_requirement_impl(ctx: Context, quality_class: str) -> str:
     """Remove the recorded level for one quality class."""
-    global nfr_profile
-
     target = validate_enum_with_enhanced_error(
         quality_class, QualityClass, 'quality_class'
     )
@@ -383,8 +379,6 @@ async def add_user_persona_impl(
     description: Optional[str] = None,
 ) -> str:
     """Add a legitimate user persona that interacts with the system."""
-    global user_personas
-
     logger.debug(f"Adding user persona: {persona_type}")
 
     # None default on the tool so 'items' can be used alone; see
@@ -449,15 +443,13 @@ async def set_nfr_requirement_impl(
     rationale: Optional[str] = None,
 ) -> str:
     """Record the required level for one non-functional quality class."""
-    global nfr_profile
-
     logger.debug(f"Setting NFR {quality_class}: {level}")
 
     requirement = NonFunctionalRequirement(
         quality_class=quality_class, level=level, rationale=rationale
     )
 
-    # One entry per class: replace any existing entry so get_level stays unambiguous
+    # One entry per class: setting an existing class replaces its requirement.
     nfr_profile.requirements = [
         r for r in nfr_profile.requirements if r.quality_class != requirement.quality_class
     ] + [requirement]

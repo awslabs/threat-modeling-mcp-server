@@ -33,6 +33,10 @@ from threat_modeling_mcp_server.utils.batch_utils import (
     batch_delete,
     batch_update,
 )
+from threat_modeling_mcp_server.utils.manager_utils import (
+    call_impl as _call_context_impl,
+    payload_error as _payload_error,
+)
 
 
 SYSTEM_CONTEXT_ACTIONS = {
@@ -199,53 +203,6 @@ replace their existing state, so retrying the same request is safe. Call
             + f"\n- `clear_fields` (update only): {clearable}"
         )
     return guide
-
-
-def _payload_error(impl_fn, payload: Dict[str, Any]) -> Optional[str]:
-    """Validate generic payload keys before dispatching to a typed helper."""
-    params = inspect.signature(impl_fn).parameters
-    accepted = [
-        name for name, param in params.items()
-        if name != "ctx"
-        and param.kind in (param.POSITIONAL_OR_KEYWORD, param.KEYWORD_ONLY)
-    ]
-    missing = [
-        name for name in accepted
-        if params[name].default is inspect.Parameter.empty and name not in payload
-    ]
-    unexpected = [key for key in payload if key not in accepted]
-
-    problems = []
-    if missing:
-        problems.append(f"missing required field(s): {', '.join(missing)}")
-    if unexpected:
-        problems.append(f"unexpected field(s): {', '.join(unexpected)}")
-    if not problems:
-        return None
-    problems.append(f"accepted fields: {', '.join(accepted)}")
-    return "; ".join(problems)
-
-
-async def _call_context_impl(
-    ctx: Context,
-    impl_fn,
-    payload: Optional[Dict[str, Any]],
-    label: str,
-) -> str:
-    """Call one typed helper with clear generic-payload errors."""
-    if payload is None:
-        payload = {}
-    if not isinstance(payload, dict):
-        return f"❌ {label} values must be an object."
-
-    error = _payload_error(impl_fn, payload)
-    if error:
-        return f"❌ {label}: {error}"
-
-    try:
-        return await impl_fn(ctx, **payload)
-    except Exception as exc:
-        return f"❌ {label} failed: {exc}"
 
 
 def _normalize_business_payload(

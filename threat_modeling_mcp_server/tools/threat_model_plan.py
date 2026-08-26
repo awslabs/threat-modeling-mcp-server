@@ -2,7 +2,7 @@
 
 import os
 import glob
-from typing import Dict, List, Optional
+from typing import List, Optional
 from loguru import logger
 from mcp.server.fastmcp import Context
 
@@ -73,8 +73,12 @@ async def generate_threat_modeling_plan(ctx: Context, directory: str = ".", auto
     """
     logger.debug('Generating threat modeling plan')
     
-    # Check if code files are present in the directory
-    code_detected = await detect_code_in_directory(directory)
+    # Check for code only when the caller wants the optional validation phase.
+    code_detected = (
+        await detect_code_in_directory(directory)
+        if auto_validate_code
+        else False
+    )
     logger.debug(f'Code detected: {code_detected}')
     
     plan = """
@@ -84,28 +88,30 @@ async def generate_threat_modeling_plan(ctx: Context, directory: str = ".", auto
 
 This is a practical, step-by-step threat modeling plan that provides specific tool guidance for conducting a thorough security analysis. Each phase includes concrete actions using the available MCP tools, ensuring systematic and comprehensive threat modeling.
 
-## Step-by-Step Guidance Tools
+## Focused Phase Guidance
 
-For detailed, focused guidance on each phase, use these new step-specific tools:
+Use `manage_workflow(action="guidance", phase=PHASE)` for detailed, focused guidance:
 
-- **Phase 1**: `get_phase_1_guidance()` - Business Context Analysis
-- **Phase 2**: `get_phase_2_guidance()` - Architecture Analysis  
-- **Phase 3**: `get_phase_3_guidance()` - Threat Actor Analysis
-- **Phase 4**: `get_phase_4_guidance()` - Trust Boundary Analysis
-- **Phase 5**: `get_phase_5_guidance()` - Asset Flow Analysis
-- **Phase 6**: `get_phase_6_guidance()` - Threat Identification
-- **Phase 7**: `get_phase_7_guidance()` - Mitigation Planning
-- **Phase 7.5**: `get_phase_7_5_guidance()` - Code Validation Analysis
-- **Phase 8**: `get_phase_8_guidance()` - Residual Risk Analysis
-- **Phase 9**: `get_phase_9_guidance()` - Output Generation
+- **Phase 1**: `phase="1"` - Business Context Analysis
+- **Phase 2**: `phase="2"` - Architecture Analysis
+- **Phase 3**: `phase="3"` - Threat Actor Analysis
+- **Phase 4**: `phase="4"` - Trust Boundary Analysis
+- **Phase 5**: `phase="5"` - Asset Flow Analysis
+- **Phase 6**: `phase="6"` - Threat Identification
+- **Phase 7**: `phase="7"` - Mitigation Planning
+- **Phase 7.5**: `phase="7.5"` - Code Validation Analysis
+- **Phase 8**: `phase="8"` - Residual Risk Analysis
+- **Phase 9**: `phase="9"` - Output Generation
 
-## ⚠️ Important: Use Step-Specific Tools
+## ⚠️ Important: Use Focused Guidance
 
-Instead of trying to follow this entire plan at once, **use the step-specific guidance tools above**. They provide focused, actionable instructions for each phase and help prevent context overload.
+Instead of trying to follow this entire plan at once, call the consolidated
+`manage_workflow` guidance action for the phase at hand. It provides focused,
+actionable instructions and helps prevent context overload.
 
 ## 📊 Progress Tracking
 
-- **Progress Tracking**: `get_current_phase_status()` - Check current progress and next steps at any time
+- **Progress Tracking**: `manage_workflow(action="status")` - Check current progress and next steps at any time
 
 ## AWS Documentation Integration - MANDATORY REQUIREMENT
 
@@ -166,7 +172,7 @@ FOR EVERY AWS SERVICE OR SECURITY RECOMMENDATION:
   and `organizational_headquarters`
 - Payload shape: `values={"business": BUSINESS_VALUES, "software": SOFTWARE_VALUES, "data_assets": DATA_ASSET_ITEMS, "user_personas": PERSONA_ITEMS, "nfrs": NFR_ITEMS}`
 
-`get_data_model_types(model_name=...)` remains available when an individual enum
+`inspect_data_models(model_name=...)` remains available when an individual enum
 needs to be inspected outside the system-context workflow.
 
 #### Step 1.3: Validate Context Completeness
@@ -176,7 +182,7 @@ needs to be inspected outside the system-context workflow.
 - Resolve every missing business feature before advancing
 
 #### Step 1.4: Document Assumptions
-**Tool:** `add_assumption(description, category, impact, rationale)`
+**Tool:** `manage_assumptions(action="add", values=ASSUMPTION)`
 - Document key business assumptions that affect the threat model
 - Examples:
   - "System will only operate in North America" (limits regulatory scope)
@@ -205,32 +211,23 @@ needs to be inspected outside the system-context workflow.
 ### Step-by-Step Process
 
 #### Step 2.1: Add System Components
-**Tool:** `add_component(name, type, service_provider, specific_service, version, description, configuration)`
+**Tool:** `manage_architecture(action="add", section="components", values=COMPONENT)`
 - Add each component of your system with detailed information
 - Include cloud services, databases, APIs, microservices, etc.
-- Examples:
-  - `add_component("API Gateway", "Network", "AWS", "API Gateway", "v2", "Main entry point for all API requests")`
-  - `add_component("User Database", "Storage", "AWS", "RDS", "PostgreSQL 13", "Stores user account information")`
-  - `add_component("Payment Service", "Compute", "AWS", "Lambda", "Python 3.9", "Processes payment transactions")`
+- Use `manage_architecture(action="describe", section="components")` for exact fields
 
-#### Step 2.2: Define Connections Between Components
-**Tool:** `add_connection(source_id, destination_id, protocol, port, encryption, description)`
-- Map how components communicate with each other
-- Include protocol details, ports, and security characteristics
-- Examples:
-  - `add_connection("C001", "C002", "HTTPS", 443, True, "API Gateway to Payment Service")`
-  - `add_connection("C002", "C003", "PostgreSQL", 5432, True, "Payment Service to User Database")`
-
-#### Step 2.3: Add Data Stores
-**Tool:** `add_data_store(name, type, classification, encryption_at_rest, backup_frequency, description)`
+#### Step 2.2: Add Data Stores
+**Tool:** `manage_architecture(action="add", section="data_stores", values=DATA_STORE)`
 - Document all data storage locations
 - Include classification and protection details
-- Examples:
-  - `add_data_store("Customer PII", "Relational", "Confidential", True, "Daily", "Personal customer information")`
-  - `add_data_store("Transaction Logs", "Object Storage", "Internal", True, "Hourly", "Payment transaction audit logs")`
+
+#### Step 2.3: Define Connections Between Architecture Nodes
+**Tool:** `manage_architecture(action="add", section="connections", values=CONNECTION)`
+- After all components and data stores exist, map how they communicate
+- Include protocol details, ports, and security characteristics
 
 #### Step 2.4: Get Architecture Analysis Plan
-**Tool:** `get_architecture_analysis_plan()`
+**Tool:** `manage_architecture(action="plan", section="all")`
 - Get a comprehensive plan for AI-powered architecture analysis
 - Follow the plan to analyze your architecture for security concerns
 - Use AWS Documentation MCP server for validation of AWS-specific recommendations
@@ -246,7 +243,7 @@ needs to be inspected outside the system-context workflow.
   - `recommend("https://docs.aws.amazon.com/vpc/latest/userguide/security.html")` for VPC security recommendations
 
 #### Step 2.6: Document Architecture Assumptions
-**Tool:** `add_assumption(description, category, impact, rationale)`
+**Tool:** `manage_assumptions(action="add", values=ASSUMPTION)`
 - Document technical assumptions that affect security
 - Include AWS-validated assumptions where applicable
 - Examples:
@@ -257,7 +254,7 @@ needs to be inspected outside the system-context workflow.
 
 ### Expected Outputs
 - Complete component inventory with detailed specifications
-- Connection map showing all inter-component communications
+- Connection map showing all architecture-node communications
 - Data store catalog with classification and protection details
 - Architecture security analysis with recommendations
 
@@ -273,7 +270,7 @@ needs to be inspected outside the system-context workflow.
 ### Step-by-Step Process
 
 #### Step 3.1: Review Default Threat Actors
-**Tool:** `list_threat_actors()`
+**Tool:** `manage_threat_actors(action="list")`
 - Review the comprehensive set of default threat actors
 - Understand their capabilities, motivations, and resources
 - Default actors include: Script Kiddies, Cybercriminals, Insider Threats, Nation-State Actors, etc.
@@ -282,15 +279,12 @@ needs to be inspected outside the system-context workflow.
   excluded from the exported report and listed in its reference-catalogue appendix instead.
 
 #### Step 3.2: Add Custom Threat Actors
-**Tool:** `add_threat_actor(name, type, sophistication_tier, motivations, resources, relationship_to_target, state_nexus, targeting_specificity, description)`
+**Tool:** `manage_threat_actors(action="add", values=ACTOR)`
 - Add threat actors specific to your business context
-- Examples:
-  - `add_threat_actor(name="Competitor", type="Competitor / Corporate Espionage", sophistication_tier="Tier 3 - Organized cybercrime", motivations=["Competitive advantage", "Espionage / intelligence collection"], resources="Organization", relationship_to_target="External", targeting_specificity="Targeted", description="Direct business competitor seeking advantage")`
-  - `add_threat_actor(name="Disgruntled Customer", type="External Attacker", sophistication_tier="Tier 1 - Opportunistic / script kiddie", motivations=["Revenge / grievance"], resources="Individual", relationship_to_target="External", description="Customer upset about service issues")`
-- Use keyword arguments for clarity
+- Call `manage_threat_actors(action="describe")` for exact taxonomy fields
 
 #### Step 3.3: Set Threat Actor Relevance
-**Tool:** `set_threat_actor_relevance(id, is_relevant)`
+**Tool:** `manage_threat_actors(action="update", item_id=ACTOR_ID, values={"is_relevant": BOOLEAN})`
 - Mark which threat actors are relevant to your specific system
 - Consider your business context, data sensitivity, and exposure
 - Examples:
@@ -298,19 +292,19 @@ needs to be inspected outside the system-context workflow.
   - Insider threats are always relevant but vary in priority
 
 #### Step 3.4: Prioritize Relevant Threat Actors
-**Tool:** `set_threat_actor_priority(id, priority)`
+**Tool:** `manage_threat_actors(action="update", item_id=ACTOR_ID, values={"priority": NUMBER})`
 - Rank threat actors by likelihood and potential impact (1-10 scale)
 - Consider your specific business context and security posture
 - Higher priority actors should be addressed first in threat identification
 
 #### Step 3.5: Analyze Threat Actors
-**Tool:** `analyze_threat_actors()`
+**Tool:** `manage_threat_actors(action="analyze")`
 - Get automated analysis of your threat actor landscape
 - Review recommendations for threat actor prioritization
 - Adjust priorities based on analysis insights
 
 #### Step 3.6: Document Threat Actor Assumptions
-**Tool:** `add_assumption(description, category, impact, rationale)`
+**Tool:** `manage_assumptions(action="add", values=ASSUMPTION)`
 - Document assumptions about threat actor capabilities and motivations
 - Examples:
   - "Nation-state actors are not interested in our system" (reduces focus on sophisticated attacks)
@@ -333,53 +327,46 @@ needs to be inspected outside the system-context workflow.
 ### Step-by-Step Process
 
 #### Step 4.1: Get Trust Boundary Detection Plan
-**Tool:** `get_trust_boundary_detection_plan()`
+**Tool:** `manage_trust_boundaries(action="detection_plan", section="all")`
 - Get a comprehensive plan for AI-powered trust boundary detection
 - Follow the detailed 6-step process for intelligent boundary analysis
 - Use LLM analysis to identify trust zones, crossing points, and boundaries
 
 #### Step 4.2: Create Trust Zones
-**Tool:** `add_trust_zone(name, trust_level, description)`
+**Tool:** `manage_trust_boundaries(action="add", section="zones", values=ZONE)`
 - Define logical trust zones based on security context
 - Trust levels: Untrusted, Low, Medium, High
-- Examples:
-  - `add_trust_zone("Internet DMZ", "Untrusted", "Public-facing components exposed to internet")`
-  - `add_trust_zone("Application Tier", "Medium", "Internal application services with authentication")`
-  - `add_trust_zone("Database Tier", "High", "Sensitive data storage with restricted access")`
 
-#### Step 4.3: Assign Components to Trust Zones
-**Tool:** `add_component_to_zone(zone_id, component_id)`
-- Assign each component to exactly one primary trust zone
+#### Step 4.3: Assign Architecture Nodes to Trust Zones
+**Tool:** `manage_trust_boundaries(action="link", section="zones", values=LINK)`
+- Pass `zone_id` and `node_id`
+- Assign each component and data store to exactly one primary trust zone
 - Ensure logical grouping based on security characteristics
 - Avoid overlapping assignments
 
 #### Step 4.4: Define Crossing Points
-**Tool:** `add_crossing_point(source_zone_id, destination_zone_id, authentication_method, authorization_method, description)`
+**Tool:** `manage_trust_boundaries(action="add", section="crossing_points", values=CROSSING)`
 - Identify where data flows between trust zones
 - Specify authentication and authorization mechanisms
-- Examples:
-  - `add_crossing_point("TZ001", "TZ002", "JWT", "RBAC", "API authentication from DMZ to app tier")`
 
 #### Step 4.5: Map Connections to Crossing Points
-**Tool:** `add_conn_to_crossing(crossing_point_id, connection_id)`
+**Tool:** `manage_trust_boundaries(action="link", section="crossing_points", values=LINK)`
 - Associate specific connections with crossing points
 - Ensures all boundary crossings are properly secured
 
 #### Step 4.6: Create Trust Boundaries
-**Tool:** `add_trust_boundary(name, type, crossing_point_ids, controls, description)`
+**Tool:** `manage_trust_boundaries(action="add", section="boundaries", values=BOUNDARY)`
 - Define trust boundaries with security controls
 - Types: Network, Process, Application, Data
-- Examples:
-  - `add_trust_boundary("DMZ Firewall", "Network", ["CP001"], ["WAF", "DDoS Protection", "Rate Limiting"], "Network boundary protecting internal systems")`
 
 #### Step 4.7: Get Trust Boundary Analysis Plan
-**Tool:** `get_trust_boundary_analysis_plan()`
+**Tool:** `manage_trust_boundaries(action="analysis_plan", section="all")`
 - Get comprehensive plan for analyzing trust boundaries for security concerns
 - Use AI-powered analysis with AWS documentation validation
 - Follow the plan to identify security gaps and recommendations
 
 ### Expected Outputs
-- Complete trust zone map with component assignments
+- Complete trust zone map with architecture-node assignments
 - Crossing point inventory with security controls
 - Trust boundary catalog with implemented protections
 - Security analysis with recommendations for improvements
@@ -396,24 +383,18 @@ needs to be inspected outside the system-context workflow.
 ### Step-by-Step Process
 
 #### Step 5.1: Identify and Add Assets
-**Tool:** `add_asset(name, type, classification, lifecycle_state, data_states, description, owner, criticality, metadata)`
+**Tool:** `manage_asset_flows(action="add", section="assets", values=ASSET)`
 - Identify all valuable assets in your system
 - Include data assets, credentials, and intellectual property
-- Examples:
-  - `add_asset(name="Credit Card Numbers", type="Data", classification="Restricted", lifecycle_state="Active", data_states=["At rest", "In transit"], description="Customer payment card data", owner="Payment Team", criticality=5)`
-  - `add_asset(name="User Passwords", type="Credential", classification="Confidential", lifecycle_state="Active", data_states=["At rest"], description="User authentication credentials", owner="Security Team", criticality=4)`
-  - `add_asset(name="API Keys", type="Credential", classification="Confidential", lifecycle_state="Active", data_states=["At rest", "In use"], description="Third-party service authentication", owner="DevOps Team", criticality=4)`
-- Use keyword arguments: `data_states` was inserted after `lifecycle_state`
+- Call `manage_asset_flows(action="describe", section="assets")` for exact fields
 
 #### Step 5.2: Map Asset Flows
-**Tool:** `add_flow(asset_id, source_id, destination_id, transformation_type, controls, description, protocol, encryption, authenticated, authorized, validated, risk_level)`
-- Document how assets move through the system
+**Tool:** `manage_asset_flows(action="add", section="flows", values=FLOW)`
+- Document how assets move between component and data-store nodes
 - Include security controls and risk assessments
-- Examples:
-  - `add_flow(asset_id="A001", source_id="C001", destination_id="C002", transformation_type="Encryption", controls=["Encryption", "Input Validation"], description="Credit card data from API to payment service", protocol="HTTPS", encryption=True, authenticated=True, authorized=True, validated=True, risk_level=2)`
 
 #### Step 5.3: Document Asset Flow Assumptions
-**Tool:** `add_assumption(description, category, impact, rationale)`
+**Tool:** `manage_assumptions(action="add", values=ASSUMPTION)`
 - Document assumptions about asset protection and handling
 - Examples:
   - "All sensitive data is encrypted at rest using AES-256" (reduces data exposure risk)
@@ -436,12 +417,10 @@ needs to be inspected outside the system-context workflow.
 ### Step-by-Step Process
 
 #### Step 6.1: Systematic Threat Discovery
-**Tool:** `add_threat(threat_source, prerequisites, threat_action, threat_impact, category, severity, likelihood, affected_components, affected_assets, tags)`
+**Tool:** `manage_threats(action="add", section="threats", values=THREAT)`
 - Apply STRIDE methodology systematically
 - Consider each threat actor against each asset and component
-- Examples:
-  - `add_threat("External Attacker", "with network access", "intercept unencrypted API calls", "exposure of sensitive data", "Information Disclosure", "High", "Possible", ["C001"], ["A001"], ["STRIDE-I", "Network"])`
-  - `add_threat("Malicious Insider", "with database access", "exfiltrate customer data", "privacy breach and regulatory fines", "Information Disclosure", "High", "Unlikely", ["C003"], ["A001", "A002"], ["STRIDE-I", "Insider"])`
+- Call `manage_threats(action="describe", section="threats")` for exact fields
 
 #### Step 6.2: Research AWS-Specific Threats (if using AWS)
 **AWS Documentation Tools:** `search_documentation`, `read_documentation`
@@ -454,14 +433,14 @@ needs to be inspected outside the system-context workflow.
   - `read_documentation("https://docs.aws.amazon.com/security/")` for general AWS security threats
 
 #### Step 6.3: Threat Categorization and Review
-**Tool:** `list_threats(category, severity, status)`
+**Tool:** `manage_threats(action="list", section="threats", values=FILTERS)`
 - Review all identified threats by category
 - Ensure comprehensive coverage across STRIDE categories
 - Validate threat-to-asset and threat-to-component mappings
 - Include AWS-specific threats discovered through documentation research
 
 #### Step 6.4: Document Threat Assumptions
-**Tool:** `add_assumption(description, category, impact, rationale)`
+**Tool:** `manage_assumptions(action="add", values=ASSUMPTION)`
 - Document assumptions that affect threat likelihood or impact
 - Include AWS-validated assumptions where applicable
 - Examples:
@@ -486,12 +465,10 @@ needs to be inspected outside the system-context workflow.
 ### Step-by-Step Process
 
 #### Step 7.1: Add Mitigations for Each Threat
-**Tool:** `add_mitigation(content, type, status, implementation_details, cost, effectiveness, metadata)`
+**Tool:** `manage_threats(action="add", section="mitigations", values=MITIGATION)`
 - Create specific mitigations for identified threats
 - Include implementation details and effectiveness ratings
-- Examples:
-  - `add_mitigation("Implement TLS 1.3 for all API communications", "Preventive", "mitigationIdentified", "Configure API Gateway and services for TLS 1.3 minimum", "Low", "High")`
-  - `add_mitigation("Deploy Web Application Firewall", "Preventive", "mitigationIdentified", "Configure AWS WAF with OWASP rules", "Medium", "High")`
+- Call `manage_threats(action="describe", section="mitigations")` for exact fields
 
 #### Step 7.2: Validate AWS Security Controls (if using AWS)
 **AWS Documentation Tools:** `search_documentation`, `read_documentation`, `recommend`
@@ -505,22 +482,23 @@ needs to be inspected outside the system-context workflow.
   - `recommend("https://docs.aws.amazon.com/security/")` for general AWS security controls
 
 #### Step 7.3: Link Mitigations to Threats
-**Tool:** `link_mitigation_to_threat(mitigation_id, threat_id)`
+**Tool:** `manage_threats(action="link", section="mitigations", values=LINK)`
 - Associate each mitigation with the threats it addresses
 - Ensure all high-priority threats have mitigations
 - Some mitigations may address multiple threats
+- Use `items=[LINK, ...]` to create multiple links in one call
 
 #### Step 7.4: Review Mitigation Coverage and Validate Links
-**Tools:** `list_mitigations(type, status)`, `list_threats()`, `get_threat(id)`, `get_mitigation(id)`
+**Tool:** `manage_threats` list/get actions for the `threats` and `mitigations` sections
 - **Critical**: Ensure ALL threats have at least one linked mitigation
 - **Critical**: Ensure ALL mitigations are linked to at least one threat
 - Identify gaps in mitigation coverage using systematic review:
 
 **Validation Process:**
-1. **List all threats**: `list_threats()` - Get complete threat inventory
-2. **For each threat**: `get_threat(id)` - Check if it has linked mitigations
-3. **List all mitigations**: `list_mitigations()` - Get complete mitigation inventory  
-4. **For each mitigation**: `get_mitigation(id)` - Check if it's linked to threats
+1. **List all threats**: `manage_threats(action="list", section="threats")`
+2. **For each threat**: `manage_threats(action="get", section="threats", item_id=ID)`
+3. **List all mitigations**: `manage_threats(action="list", section="mitigations")`
+4. **For each mitigation**: `manage_threats(action="get", section="mitigations", item_id=ID)`
 5. **Identify orphaned threats**: Threats with no mitigations
 6. **Identify orphaned mitigations**: Mitigations not linked to any threats
 7. **Create additional mitigations**: For unmitigated threats
@@ -545,7 +523,7 @@ needs to be inspected outside the system-context workflow.
 - Do all AWS-specific threats have AWS-validated mitigations?
 
 #### Step 7.6: Document Mitigation Assumptions
-**Tool:** `add_assumption(description, category, impact, rationale)`
+**Tool:** `manage_assumptions(action="add", values=ASSUMPTION)`
 - Document assumptions about mitigation effectiveness
 - Include AWS-validated assumptions where applicable
 - Examples:
@@ -574,7 +552,7 @@ needs to be inspected outside the system-context workflow.
 ### Step-by-Step Process
 
 #### Step 7.5.1: Get Phase 7.5 Guidance
-**Tool:** `get_phase_7_5_guidance()`
+**Tool:** `manage_workflow(action="guidance", phase="7.5")`
 - Get detailed guidance for code validation analysis
 - Review objectives, steps, and expected outputs
 
@@ -619,37 +597,38 @@ needs to be inspected outside the system-context workflow.
 ### Step-by-Step Process
 
 #### Step 8.1: Get Phase 8 Guidance
-**Tool:** `get_phase_8_guidance()`
+**Tool:** `manage_workflow(action="guidance", phase="8")`
 - Get detailed guidance for residual risk analysis
 - Review objectives and methodology
 
 #### Step 8.2: Review All Threats and Mitigations
-**Tools:** `list_threats()`, `list_mitigations()`
+**Tool:** `manage_threats(action="list", section="all")`
 - Get complete inventory of threats and mitigations
 - Review current status of each threat
 - Identify unmitigated or partially mitigated threats
 
 #### Step 8.3: Assess Residual Risk for Each Threat
-**Tool:** `get_threat(id)` for each threat
+**Tool:** `manage_threats(action="get", section="threats", item_id=ID)`
 - Evaluate remaining risk after mitigations
-- Consider likelihood and impact of residual risk
-- Document risk assessment rationale
+- Choose Open, Accepted, Mitigated, or Not Applicable
+- Record residual severity, likelihood, and rationale
 
 #### Step 8.4: Make Risk Acceptance Decisions
-**Tool:** `update_threat(id, status, ...)`
-- Update threat status based on risk decisions
-- Mark threats as: threatResolved, threatResolvedNotUseful
-- Document business justification for each decision
+**Tool:** `manage_threats(action="assess", section="threats", items=ASSESSMENTS)`
+- Save all decisions atomically
+- Each item requires `threat_id`, `decision`, and `rationale`
+- Residual severity and likelihood are required except for Not Applicable
+- The server derives the Threat Composer status from the decision
 
 #### Step 8.5: Document Risk Assumptions
-**Tool:** `add_assumption(description, category, impact, rationale)`
+**Tool:** `manage_assumptions(action="add", values=ASSUMPTION)`
 - Document assumptions about residual risks
 - Include business risk tolerance decisions
 - Record risk acceptance criteria
 
 ### Expected Outputs
 - Complete residual risk assessment
-- Updated threat statuses with justifications
+- Current decision, residual ratings, and rationale for every threat
 - Risk acceptance documentation
 
 ---
@@ -664,19 +643,20 @@ needs to be inspected outside the system-context workflow.
 ### Step-by-Step Process
 
 #### Step 9.1: Get Phase 9 Guidance
-**Tool:** `get_phase_9_guidance()`
+**Tool:** `manage_workflow(action="guidance", phase="9")`
 - Get detailed guidance for output generation
 - Review export options and formats
 
 #### Step 9.2: Export Comprehensive Threat Model
-**Tool:** `export_comprehensive_threat_model(output_path)`
+**Tool:** `export_threat_model(output_path="threat_model.json")`
 - Export complete threat model with all global variables to JSON format
 - Include all components, threats, mitigations, business context, assumptions, and phase progress
 - Include current threat and mitigation statuses, including updates from code validation
 - Compatible with AWS Threat Composer and includes extended data
+- Phase 9 completes only after both files represent the current model
 
 #### Step 9.3: Generate Summary Reports
-**Tools:** `get_threat_model_progress()`, `list_assumptions()`
+**Tools:** `manage_workflow(action="progress")`, `manage_assumptions(action="list")`
 - Create executive summary of threat modeling process
 - Document key findings and recommendations
 - Include progress metrics and completion status
@@ -689,12 +669,12 @@ needs to be inspected outside the system-context workflow.
 
 ## 🎯 Recommended Approach: Sequential Phase Execution
 
-**IMPORTANT**: Follow the phases sequentially using the step-specific guidance tools:
+**IMPORTANT**: Follow the phases sequentially using the workflow guidance action:
 
 ### Execution Flow:
-1. **`get_phase_1_guidance()`** → Complete Phase 1 → **`get_phase_2_guidance()`** → etc.
-2. **`get_current_phase_status()`** - Check progress at any time
-3. Use individual tools as guided by each phase
+1. **`manage_workflow(action="guidance", phase="1")`** → Complete Phase 1 → **`manage_workflow(action="guidance", phase="2")`** → etc.
+2. **`manage_workflow(action="status")`** - Check progress at any time
+3. Use the compact domain managers as guided by each phase
 
 ### Phase Transition Checklist:
 - ✅ Complete all steps in current phase
@@ -703,47 +683,23 @@ needs to be inspected outside the system-context workflow.
 - ✅ Move to next phase guidance tool
 
 ### Critical Phases Requiring Extra Attention:
-- **Phase 7.5**: Use `manage_code_validation()` to load the finding contract, record implementation evidence for every threat and mitigation, validate coverage, and generate the report
-- **Phase 8**: Use `update_threat()` to set final threat statuses
-- **Phase 9**: Use `export_comprehensive_threat_model()` for final output
+- **Phase 7.5**: Start with `manage_code_validation(action="describe")`, then record implementation evidence for every threat and mitigation, validate coverage, and generate the report
+- **Phase 8**: Use `manage_threats(action="assess", section="threats", ...)` to record current residual-risk decisions
+- **Phase 9**: Use `export_threat_model()` for final output
 
-### Why Use Step-Specific Tools?
+### Why Use Focused Phase Guidance?
 - **Reliability**: No dependency on unimplemented orchestrator functions
 - **Transparency**: Users see exactly what tools to use at each step
 - **Flexibility**: Users can adapt the process to their specific needs
-- **Maintainability**: Easier to maintain individual tools than complex orchestrators
+- **Maintainability**: Domain managers centralize related operations and payload guidance
 - **Debugging**: Easier to troubleshoot when users follow explicit steps
 
 ## Conclusion
 
-This comprehensive plan provides the full methodology, and the **step-specific guidance tools** provide the most effective way to execute the threat modeling process. Use them for reliable, consistent results without hitting implementation roadblocks.
+This comprehensive plan provides the full methodology, and
+`manage_workflow(action="guidance", phase=PHASE)` provides the focused
+instructions needed to execute one phase at a time without loading every phase
+into context.
 """
     
     return plan
-
-
-# Register tools with the MCP server
-def register_tools(mcp):
-    """Register threat model planning tools with the MCP server.
-    
-    Args:
-        mcp: The MCP server instance
-    """
-    @mcp.tool()
-    async def get_threat_modeling_plan(ctx: Context, directory: str = ".", auto_validate_code: bool = True) -> str:
-        """Get a comprehensive threat modeling plan.
-
-        This tool returns a detailed threat modeling plan in markdown format,
-        covering all phases of the threat modeling process. If code is detected in the
-        specified directory and auto_validate_code is true, it includes the
-        conditional code-validation phase.
-
-        Args:
-            ctx: MCP context for logging and error handling
-            directory: Directory to check for code files (default: current directory)
-            auto_validate_code: Whether to include code-validation guidance when code is detected (default: True)
-
-        Returns:
-            A markdown-formatted threat modeling plan
-        """
-        return await generate_threat_modeling_plan(ctx, directory, auto_validate_code)

@@ -209,10 +209,10 @@ class TestCompletionAndFreshness:
         values = complete_values(threat_id, mitigation_id)
         await call("record", values)
         await call("report")
-        assert csv.code_validation_is_complete()
+        assert csv.build_code_validation_export_data()["is_complete"]
 
         await call("record", values)
-        assert not csv.code_validation_is_complete()
+        assert not csv.build_code_validation_export_data()["is_complete"]
         await call("report")
         tg.threats[threat_id].threatAction = "read every tenant's records"
 
@@ -245,7 +245,7 @@ class TestCompletionAndFreshness:
         assert csv.validation_project_directory == str(second)
         assert len(csv.threat_findings) == 1
         assert len(csv.mitigation_findings) == 1
-        assert not csv.code_validation_is_complete()
+        assert not csv.build_code_validation_export_data()["is_complete"]
 
     @pytest.mark.asyncio
     async def test_clear_reopens_phase(self, empty_threat_model_state, tmp_path):
@@ -254,8 +254,8 @@ class TestCompletionAndFreshness:
         threat_id, mitigation_id = await seed_pair()
         await call("record", complete_values(threat_id, mitigation_id))
         await call("report")
-        assert csv.code_validation_is_complete()
+        assert csv.build_code_validation_export_data()["is_complete"]
 
         assert "cleared" in (await call("clear")).lower()
-        assert not csv.code_validation_is_complete()
+        assert not csv.build_code_validation_export_data()["is_complete"]
         assert not csv.threat_findings and not csv.mitigation_findings

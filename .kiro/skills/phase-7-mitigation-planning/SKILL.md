@@ -10,7 +10,10 @@ Define security controls for every identified threat and ensure complete coverag
 
 ## Tools Reference
 
-### add_mitigation(content, type, status, implementation_details, cost, effectiveness, metadata)
+### manage_threats(action="add", section="mitigations", values=MITIGATION)
+
+Call `manage_threats(action="describe", section="mitigations")` first for the
+exact contract.
 | Parameter | Required | Values |
 |---|---|---|
 | content | Yes | Description of the mitigation |
@@ -20,14 +23,16 @@ Define security controls for every identified threat and ensure complete coverag
 | cost | No | Low, Medium, High |
 | effectiveness | No | Low, Medium, High |
 
-### link_mitigation_to_threat(mitigation_id, threat_id)
+### manage_threats(action="link", section="mitigations", values=LINK)
 Connect a mitigation to the threat it addresses. A mitigation can address multiple threats.
+Use `items=[LINK, ...]` to create multiple links in one call; each item is
+reported independently.
 
 ### Other Phase 7 Tools
-- `list_mitigations()` -- Review all mitigations
-- `get_mitigation(id)` -- Detailed view
-- `list_threats()` -- Review threats to ensure coverage
-- `get_threat(id)` -- Check linked mitigations per threat
+- `manage_threats(action="list", section="mitigations")` -- Review all mitigations
+- `manage_threats(action="get", section="mitigations", item_id=ID)` -- Detailed mitigation view
+- `manage_threats(action="list", section="threats")` -- Review threats for coverage
+- `manage_threats(action="get", section="threats", item_id=ID)` -- Check linked mitigations
 
 ## Mitigation Types
 
@@ -53,10 +58,10 @@ Connect a mitigation to the threat it addresses. A mitigation can address multip
 
 After adding mitigations and linking them:
 
-1. **`list_threats()`** -- Get all threats
-2. **`get_threat(id)`** for each -- Check it has linked mitigations
-3. **`list_mitigations()`** -- Get all mitigations
-4. **`get_mitigation(id)`** for each -- Check it's linked to threats
+1. **`manage_threats(action="list", section="threats")`** -- Get all threats
+2. **`manage_threats(action="get", section="threats", item_id=ID)`** -- Check links
+3. **`manage_threats(action="list", section="mitigations")`** -- Get all mitigations
+4. **`manage_threats(action="get", section="mitigations", item_id=ID)`** -- Check links
 5. **Fix gaps**: Add mitigations for orphaned threats, link orphaned mitigations
 
 **Critical rules**:
@@ -66,7 +71,7 @@ After adding mitigations and linking them:
 
 ## Workflow
 
-1. **Call `get_phase_7_guidance()`** (auto-detects if code exists for Phase 7.5)
+1. **Call `manage_workflow(action="guidance", phase="7")`** (auto-detects if code exists for Phase 7.5)
 2. **For each threat**, create appropriate mitigations
 3. **Link every mitigation** to its threats
 4. **If AWS**: Validate controls with `search_documentation()` and `read_documentation()`
@@ -79,4 +84,4 @@ After adding mitigations and linking them:
 - [ ] Mitigation types appropriate for threat categories
 - [ ] Implementation details provided
 - [ ] Coverage validation complete
-- [ ] Call `advance_phase()` -- proceeds to Phase 7.5 (if code) or Phase 8
+- [ ] Call `manage_workflow(action="advance")` -- proceeds to Phase 7.5 (if code) or Phase 8

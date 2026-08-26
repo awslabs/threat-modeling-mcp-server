@@ -2,7 +2,7 @@
 
 from enum import Enum
 from typing import List, Optional
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 from threat_modeling_mcp_server.validation.enum_validator import validate_enum_with_enhanced_error
 
 
@@ -57,7 +57,7 @@ class TrustZone(BaseModel):
     id: str
     name: str
     trust_level: TrustLevel
-    contained_components: List[str] = []  # References to component IDs
+    contained_nodes: List[str] = Field(default_factory=list)
     description: Optional[str] = None
 
     @field_validator('trust_level', mode='before')
@@ -71,7 +71,7 @@ class CrossingPoint(BaseModel):
     id: str
     source_zone_id: str
     destination_zone_id: str
-    connection_ids: List[str] = []  # References to connection IDs
+    connection_ids: List[str] = Field(default_factory=list)
     authentication_method: Optional[AuthenticationMethod] = None
     authorization_method: Optional[AuthorizationMethod] = None
     description: Optional[str] = None
@@ -92,8 +92,8 @@ class TrustBoundary(BaseModel):
     id: str
     name: str
     type: BoundaryType
-    crossing_points: List[str] = []  # References to crossing point IDs
-    controls: List[str] = []  # Security controls at this boundary
+    crossing_points: List[str] = Field(default_factory=list)
+    controls: List[str] = Field(default_factory=list)
     description: Optional[str] = None
 
     @field_validator('type', mode='before')

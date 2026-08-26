@@ -34,12 +34,12 @@ class TestNFRProfile:
         with pytest.raises(ValueError):
             NF.NonFunctionalRequirement(quality_class="Availability", level="Elastic")
 
-    def test_profile_lookup(self):
+    def test_profile_stores_requirements(self):
         profile = NF.NFRProfile(requirements=[
             NF.NonFunctionalRequirement(quality_class="Scalability", level="Elastic"),
         ])
-        assert profile.get_level(NF.QualityClass.SCALABILITY) == "Elastic"
-        assert profile.get_level(NF.QualityClass.AVAILABILITY) is None
+        assert profile.requirements[0].quality_class is NF.QualityClass.SCALABILITY
+        assert profile.requirements[0].level == "Elastic"
 
 
 class TestAssetDataStates:
@@ -102,14 +102,14 @@ class TestDefaultThreatActors:
     """Default library contents."""
 
     def test_defaults_cover_twelve_of_thirteen_types(self):
-        actors = TA.ThreatActorLibrary().get_default_actors()
+        actors = TA.ThreatActorLibrary.get_default_actors()
         assert len(actors) == 12
         types = {a.type for a in actors.values()}
         assert TA.ThreatActorType.OTHER not in types
         assert len(types) == 12
 
     def test_defaults_populate_actor_facets(self):
-        actors = TA.ThreatActorLibrary().get_default_actors()
+        actors = TA.ThreatActorLibrary.get_default_actors()
         for actor in actors.values():
             assert actor.relationship_to_target is not None
             assert actor.sophistication_tier is not None
@@ -210,7 +210,12 @@ class TestClassificationProfileTools:
         result = await cp.set_nfr_requirement_impl(_Ctx(), "Availability", "99.99%")
 
         assert len(cp.nfr_profile.requirements) == 2
-        assert cp.nfr_profile.get_level(NF.QualityClass.AVAILABILITY) == "99.99%"
+        availability = next(
+            requirement
+            for requirement in cp.nfr_profile.requirements
+            if requirement.quality_class is NF.QualityClass.AVAILABILITY
+        )
+        assert availability.level == "99.99%"
         out = await cp.list_nfr_requirements_impl(_Ctx())
         assert "**Availability**: 99.99%" in out
         assert ">" not in out
@@ -473,18 +478,18 @@ class TestOutputRendering:
         self, tmp_path, monkeypatch
     ):
         from threat_modeling_mcp_server.utils.comprehensive_exporter import (
-            export_comprehensive_threat_model,
+            export_threat_model_files,
         )
 
         # The exporter writes into ./.threatmodel, so run in a temp working
         # directory. Never delete the repository's .threatmodel directory.
         monkeypatch.chdir(tmp_path)
 
-        with_extended = export_comprehensive_threat_model("claim_test", True)
+        with_extended = export_threat_model_files("claim_test", True)
         assert "contains only standard schema fields" not in with_extended
         assert "extended taxonomy keys" in with_extended
 
-        standard_only = export_comprehensive_threat_model("claim_test_std", False)
+        standard_only = export_threat_model_files("claim_test_std", False)
         assert "contains only standard schema fields" in standard_only
 
 

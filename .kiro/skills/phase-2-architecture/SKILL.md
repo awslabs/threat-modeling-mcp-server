@@ -10,7 +10,11 @@ Document every component, connection, and data store in the system. This becomes
 
 ## Tools Reference
 
-### add_component(name, type, service_provider, specific_service, version, description, configuration)
+Start with `manage_architecture(action="describe", section=SECTION)` to load the
+exact fields and accepted enum values for `components`, `connections`, or
+`data_stores`.
+
+### manage_architecture(action="add", section="components", values=COMPONENT)
 | Parameter | Required | Values |
 |---|---|---|
 | name | Yes | e.g., "API Gateway", "User Database" |
@@ -21,17 +25,17 @@ Document every component, connection, and data store in the system. This becomes
 | description | No | What this component does |
 | configuration | No | Dict of config details |
 
-### add_connection(source_id, destination_id, protocol, port, encryption, description)
+### manage_architecture(action="add", section="connections", values=CONNECTION)
 | Parameter | Required | Values |
 |---|---|---|
-| source_id | Yes | Component ID (from add_component response) |
-| destination_id | Yes | Component ID |
+| source_id | Yes | Component or data-store node ID |
+| destination_id | Yes | Component or data-store node ID |
 | protocol | No | HTTP, HTTPS, TCP, UDP, SSH, FTP, SMTP, WebSocket, gRPC, MQTT, Other |
 | port | No | Integer port number |
 | encryption | No | true/false |
 | description | No | What flows over this connection |
 
-### add_data_store(name, type, classification, encryption_at_rest, backup_frequency, description)
+### manage_architecture(action="add", section="data_stores", values=DATA_STORE)
 | Parameter | Required | Values |
 |---|---|---|
 | name | Yes | e.g., "Customer PII Store" |
@@ -42,19 +46,19 @@ Document every component, connection, and data store in the system. This becomes
 | description | No | What data is stored |
 
 ### Other Phase 2 Tools
-- `list_components()` -- Review all components
-- `list_connections()` -- Review all connections
-- `list_data_stores()` -- Review all data stores
-- `get_architecture_analysis_plan()` -- AI-powered analysis guidance
-- `clear_architecture()` -- Start over if needed
+- `manage_architecture(action="list", section=SECTION)` -- Review one entity type
+- `manage_architecture(action="list", section="all")` -- Review the complete architecture
+- `manage_architecture(action="plan", section="all")` -- AI-powered analysis guidance
+- `manage_architecture(action="clear", section="all")` -- Start over if no asset flows depend on it
+- Add and update operations accept `items` for batches; get field details with `describe`
 
 ## Workflow
 
-1. **Call `get_phase_2_guidance()`** for detailed instructions
+1. **Call `manage_workflow(action="guidance", phase="2")`** for detailed instructions
 2. **Scan the codebase** for services, APIs, databases, queues, caches, external integrations
-3. **Add components** -- every distinct service, database, CDN, load balancer, etc.
-4. **Add connections** -- map all communication paths with protocol and encryption status
-5. **Add data stores** -- every place data persists, with classification
+3. **Add components** with `manage_architecture(action="add", section="components", ...)`
+4. **Add data stores** with `section="data_stores"` and include classification
+5. **After all nodes exist, add connections** with `section="connections"` and include protocol and encryption status; data stores are valid endpoints
 6. **If AWS**: Use `search_documentation()` to validate service security configs
 7. **Document assumptions** about the architecture
 
@@ -72,13 +76,14 @@ Document every component, connection, and data store in the system. This becomes
 
 ## Completion Criteria
 - [ ] All system components added
-- [ ] All inter-component connections mapped
+- [ ] Every component and data store participates in a connection, unless the architecture has only one node
 - [ ] All data stores documented with classification
-- [ ] `list_components()` shows comprehensive inventory
-- [ ] Call `advance_phase()` to proceed to Phase 3
+- [ ] `manage_architecture(action="list", section="all")` shows a comprehensive inventory
+- [ ] Call `manage_workflow(action="advance")` to proceed to Phase 3
 
 ## Common Pitfalls
 - Forgetting external dependencies (third-party APIs, CDNs, DNS)
 - Not specifying encryption status on connections
 - Missing data stores (logs, caches, temp files are also data stores)
 - Not classifying data store sensitivity
+- Modeling a data store but omitting its connections

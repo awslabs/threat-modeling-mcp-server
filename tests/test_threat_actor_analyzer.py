@@ -21,25 +21,31 @@ def ctx():
 
 class TestThreatActorBatchToolBoundary:
     async def test_batch_add_threat_actors(self):
-        result = await call("add_threat_actor", items=[
-            {
-                "name": "Batch Hacktivist",
-                "type": "Hacktivist",
-                "sophistication_tier": "Tier 2 - Hacktivist / campaign-driven",
-                "motivations": ["Ideological / hacktivism"],
-                "resources": "Contest / crowd",
-            },
-            {
-                "name": "Batch Competitor",
-                "type": "Competitor / Corporate Espionage",
-                "sophistication_tier": "Tier 3 - Organized cybercrime",
-                "motivations": [
-                    "Competitive advantage",
-                    "Espionage / intelligence collection",
-                ],
-                "resources": "Organization",
-            },
-        ])
+        result = await call(
+            "manage_threat_actors",
+            action="add",
+            items=[
+                {
+                    "name": "Batch Hacktivist",
+                    "type": "Hacktivist",
+                    "sophistication_tier": (
+                        "Tier 2 - Hacktivist / campaign-driven"
+                    ),
+                    "motivations": ["Ideological / hacktivism"],
+                    "resources": "Contest / crowd",
+                },
+                {
+                    "name": "Batch Competitor",
+                    "type": "Competitor / Corporate Espionage",
+                    "sophistication_tier": "Tier 3 - Organized cybercrime",
+                    "motivations": [
+                        "Competitive advantage",
+                        "Espionage / intelligence collection",
+                    ],
+                    "resources": "Organization",
+                },
+            ],
+        )
 
         assert "Successfully added 2 threat actor(s)" in result
         by_name = {actor.name: actor for actor in actors.threat_actors.values()}

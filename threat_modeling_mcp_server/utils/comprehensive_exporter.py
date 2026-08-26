@@ -9,11 +9,15 @@ from loguru import logger
 from threat_modeling_mcp_server.utils.state_collector import (
     collect_all_state,
     count_reviewed,
+    model_state_fingerprint,
     split_reviewed,
     ThreatModelState,
 )
-from threat_modeling_mcp_server.models.threat_models import ThreatModel
 from threat_modeling_mcp_server.utils.file_utils import normalize_output_path
+
+
+last_successful_export_fingerprint: Optional[str] = None
+last_successful_export_paths: Dict[str, str] = {}
 
 
 def convert_business_context_to_dict(business_context) -> Dict[str, Any]:
@@ -90,7 +94,7 @@ def convert_assumptions_to_threat_composer_format(assumptions: Dict[str, Any]) -
     """
     result = []
 
-    for assumption_id, assumption in assumptions.items():
+    for assumption in assumptions.values():
         assumption_dict = {
             "id": assumption.id,
             "numericId": int(assumption.id.replace("A", "")) if assumption.id.startswith("A") else len(result) + 1,
@@ -126,7 +130,7 @@ def convert_threats_to_threat_composer_format(threats: Dict[str, Any]) -> List[D
     """
     result = []
 
-    for threat_id, threat in threats.items():
+    for threat in threats.values():
         # Use our internal status directly (now compatible with Threat Composer)
         threat_status = threat.status.value if threat.status else "threatIdentified"
 
@@ -173,7 +177,7 @@ def convert_mitigations_to_threat_composer_format(mitigations: Dict[str, Any]) -
     """
     result = []
 
-    for mitigation_id, mitigation in mitigations.items():
+    for mitigation in mitigations.values():
         # Use our internal status directly (now compatible with Threat Composer)
         mitigation_status = mitigation.status.value if mitigation.status else "mitigationIdentified"
 
@@ -203,7 +207,7 @@ def convert_components_to_dict(components: Dict[str, Any]) -> List[Dict[str, Any
     """
     result = []
 
-    for component_id, component in components.items():
+    for component in components.values():
         component_dict = {
             "id": component.id,
             "name": component.name,
@@ -230,7 +234,7 @@ def convert_connections_to_dict(connections: Dict[str, Any]) -> List[Dict[str, A
     """
     result = []
 
-    for connection_id, connection in connections.items():
+    for connection in connections.values():
         connection_dict = {
             "id": connection.id,
             "source_id": connection.source_id,
@@ -256,7 +260,7 @@ def convert_data_stores_to_dict(data_stores: Dict[str, Any]) -> List[Dict[str, A
     """
     result = []
 
-    for data_store_id, data_store in data_stores.items():
+    for data_store in data_stores.values():
         data_store_dict = {
             "id": data_store.id,
             "name": data_store.name,
@@ -302,6 +306,31 @@ def convert_generic_objects_to_dict(objects: Dict[str, Any]) -> List[Dict[str, A
     return result
 
 
+def convert_residual_assessments_to_dict(state) -> List[Dict[str, Any]]:
+    """Convert residual-risk records without exposing internal fingerprints."""
+    from threat_modeling_mcp_server.tools.threat_generator import (
+        is_residual_assessment_current,
+    )
+
+    result = []
+    for threat_id, assessment in state.residual_risk_assessments.items():
+        result.append({
+            "threat_id": threat_id,
+            "decision": assessment.decision.value,
+            "residual_severity": (
+                assessment.residual_severity.value
+                if assessment.residual_severity else None
+            ),
+            "residual_likelihood": (
+                assessment.residual_likelihood.value
+                if assessment.residual_likelihood else None
+            ),
+            "rationale": assessment.rationale,
+            "is_current": is_residual_assessment_current(threat_id),
+        })
+    return result
+
+
 def build_extended_export_data(state) -> Dict[str, Any]:
     """Build the non-Threat-Composer keys, including classification profiles.
 
@@ -329,6 +358,7 @@ def build_extended_export_data(state) -> Dict[str, Any]:
         "trustBoundaries": convert_generic_objects_to_dict(state.trust_boundaries),
         "assets": convert_generic_objects_to_dict(assets),
         "flows": convert_generic_objects_to_dict(flows),
+        "residualRiskAssessments": convert_residual_assessments_to_dict(state),
         "softwareProfile": (
             state.software_profile.model_dump(mode="json") if state.software_profile else {}
         ),
@@ -357,7 +387,10 @@ def build_extended_export_data(state) -> Dict[str, Any]:
     }
 
 
-def export_comprehensive_threat_model(output_path: str, include_extended_data: bool = True) -> str:
+def export_threat_model_files(
+    output_path: str,
+    include_extended_data: bool = True,
+) -> str:
     """Export comprehensive threat model to both Threat Composer JSON and Markdown formats.
 
     Args:
@@ -378,6 +411,12 @@ def export_comprehensive_threat_model(output_path: str, include_extended_data: b
 
     # Collect all state
     state = collect_all_state()
+    export_fingerprint = model_state_fingerprint(state)
+    # A successful write of this snapshot satisfies Phase 9. Use a copied
+    # progress mapping so the exported files describe their resulting state
+    # without changing live workflow state before both files succeed.
+    state.phase_completion = dict(state.phase_completion)
+    state.phase_completion[9] = 1.0
 
     # Normalize the output path to be in .threatmodel directory
     normalized_path = normalize_output_path(output_path)
@@ -453,6 +492,19 @@ def export_comprehensive_threat_model(output_path: str, include_extended_data: b
 
     # Generate comprehensive summary
     if json_success and markdown_success:
+        global last_successful_export_fingerprint, last_successful_export_paths
+        last_successful_export_fingerprint = export_fingerprint
+        last_successful_export_paths = {
+            "json": json_path,
+            "markdown": markdown_path,
+        }
+        try:
+            from threat_modeling_mcp_server.tools.step_orchestrator import (
+                detect_phase_completion,
+            )
+            detect_phase_completion()
+        except Exception as e:
+            logger.warning(f"Failed to refresh phase completion after export: {e}")
         status = "✅ Both formats exported successfully"
     elif json_success:
         status = "⚠️ JSON exported successfully, Markdown failed"
@@ -486,7 +538,8 @@ def export_comprehensive_threat_model(output_path: str, include_extended_data: b
     json_format_label = (
         "Threat Composer JSON plus extended taxonomy keys "
         "(softwareProfile, dataAssetProfiles, userPersonas, "
-        "nonFunctionalRequirements, businessContext, phaseProgress). Threat "
+        "nonFunctionalRequirements, residualRiskAssessments, businessContext, "
+        "phaseProgress). Threat "
         "Composer ignores unknown keys, so the file still imports."
         if include_extended_data
         else "Threat Composer JSON (standard fields only)"
@@ -530,81 +583,6 @@ def export_comprehensive_threat_model(output_path: str, include_extended_data: b
     return summary.strip()
 
 
-def export_comprehensive_threat_model_markdown(output_path: str) -> str:
-    """Export comprehensive threat model to markdown format.
-
-    Args:
-        output_path: Path to save the exported threat model
-
-    Returns:
-        Confirmation message with export details
-    """
-    logger.info(f"Starting comprehensive threat model markdown export to {output_path}")
-
-    # Collect all state
-    state = collect_all_state()
-
-    # Normalize the output path to be in .threatmodel directory
-    normalized_path = normalize_output_path(output_path)
-
-    # Ensure the path ends with .md
-    if not normalized_path.endswith('.md'):
-        normalized_path += '.md'
-
-    # Create the .threatmodel directory if it doesn't exist
-    threatmodel_dir = os.path.join(os.path.dirname(normalized_path), '.threatmodel')
-    os.makedirs(threatmodel_dir, exist_ok=True)
-
-    # Update the path to be in .threatmodel directory
-    filename = os.path.basename(normalized_path)
-    final_path = os.path.join(threatmodel_dir, filename)
-
-    # Generate markdown content
-    markdown_content = generate_threat_model_markdown(state)
-
-    # Write to file
-    try:
-        with open(final_path, "w", encoding="utf-8") as f:
-            f.write(markdown_content)
-
-        logger.info(f"Successfully exported threat model markdown to {final_path}")
-
-        # Generate summary
-        summary = f"""
-# Threat Model Markdown Export Complete
-
-**Export Path**: {final_path}
-**Export Timestamp**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-
-## Export Summary
-- **Threats**: {len(state.threats)}
-- **Mitigations**: {len(state.mitigations)}
-- **Assumptions**: {len(state.assumptions)}
-- **Components**: {len(state.components)}
-- **Assets**: {len(state.assets)}
-- **Threat Actors**: {count_reviewed(state.threat_actors)}
-- **Trust Zones**: {len(state.trust_zones)}
-- **Data Stores**: {len(state.data_stores)}
-
-## Current Phase
-- **Phase**: {state.current_phase} - {state.phases.get(state.current_phase, 'Unknown')}
-- **Overall Completion**: {sum(state.phase_completion.values()) / len(state.phase_completion) * 100:.1f}%
-
-## File Details
-- **Format**: Markdown (.md)
-- **File Size**: {os.path.getsize(final_path)} bytes
-
-The exported markdown file contains a comprehensive, human-readable threat model report.
-"""
-
-        return summary.strip()
-
-    except Exception as e:
-        error_msg = f"Failed to export threat model markdown: {str(e)}"
-        logger.error(error_msg)
-        return error_msg
-
-
 def generate_threat_model_markdown(state: ThreatModelState) -> str:
     """Generate comprehensive threat model markdown content.
 
@@ -621,6 +599,10 @@ def generate_threat_model_markdown(state: ThreatModelState) -> str:
     trust_boundaries = state.trust_boundaries
     assets = state.assets
     flows = state.flows
+
+    def node_label(node_id: str) -> str:
+        node = state.components.get(node_id) or state.data_stores.get(node_id)
+        return f"{node.name} ({node_id})" if node else node_id
 
     catalogue = [("Threat Actors", unreviewed_actors)] if unreviewed_actors else []
 
@@ -827,7 +809,7 @@ def generate_threat_model_markdown(state: ThreatModelState) -> str:
         md.append("")
         md.append("| ID | Name | Type | Service Provider | Description |")
         md.append("|---|---|---|---|---|")
-        for comp_id, comp in state.components.items():
+        for comp in state.components.values():
             provider = comp.service_provider.value if comp.service_provider else "N/A"
             description = comp.description or "N/A"
             md.append(f"| {comp.id} | {comp.name} | {comp.type.value} | {provider} | {description} |")
@@ -838,12 +820,16 @@ def generate_threat_model_markdown(state: ThreatModelState) -> str:
         md.append("")
         md.append("| ID | Source | Destination | Protocol | Port | Encrypted | Description |")
         md.append("|---|---|---|---|---|---|---|")
-        for conn_id, conn in state.connections.items():
+        for conn in state.connections.values():
             protocol = conn.protocol.value if conn.protocol else "N/A"
             port = str(conn.port) if conn.port else "N/A"
             encrypted = "Yes" if conn.encryption else "No"
             description = conn.description or "N/A"
-            md.append(f"| {conn.id} | {conn.source_id} | {conn.destination_id} | {protocol} | {port} | {encrypted} | {description} |")
+            md.append(
+                f"| {conn.id} | {node_label(conn.source_id)} | "
+                f"{node_label(conn.destination_id)} | {protocol} | {port} | "
+                f"{encrypted} | {description} |"
+            )
         md.append("")
 
     if state.data_stores:
@@ -851,7 +837,7 @@ def generate_threat_model_markdown(state: ThreatModelState) -> str:
         md.append("")
         md.append("| ID | Name | Type | Classification | Encrypted at Rest | Description |")
         md.append("|---|---|---|---|---|---|")
-        for ds_id, ds in state.data_stores.items():
+        for ds in state.data_stores.values():
             encrypted = "Yes" if ds.encryption_at_rest else "No"
             description = ds.description or "N/A"
             md.append(f"| {ds.id} | {ds.name} | {ds.type.value} | {ds.classification.value} | {encrypted} | {description} |")
@@ -861,7 +847,7 @@ def generate_threat_model_markdown(state: ThreatModelState) -> str:
     md.append("## Threat Actors")
     md.append("")
     if threat_actors:
-        for actor_id, actor in threat_actors.items():
+        for actor in threat_actors.values():
             md.append(f"### {actor.name}")
             md.append("")
             md.append(f"- **Type**: {actor.type.value}")
@@ -892,10 +878,15 @@ def generate_threat_model_markdown(state: ThreatModelState) -> str:
     if trust_zones:
         md.append("### Trust Zones")
         md.append("")
-        for zone_id, zone in trust_zones.items():
+        for zone in trust_zones.values():
             md.append(f"#### {zone.name}")
             md.append("")
             md.append(f"- **Trust Level**: {zone.trust_level.value}")
+            if zone.contained_nodes:
+                md.append(
+                    f"- **Architecture Nodes**: "
+                    + ", ".join(node_label(node_id) for node_id in zone.contained_nodes)
+                )
             if zone.description:
                 md.append(f"- **Description**: {zone.description}")
             md.append("")
@@ -903,7 +894,7 @@ def generate_threat_model_markdown(state: ThreatModelState) -> str:
     if trust_boundaries:
         md.append("### Trust Boundaries")
         md.append("")
-        for boundary_id, boundary in trust_boundaries.items():
+        for boundary in trust_boundaries.values():
             md.append(f"#### {boundary.name}")
             md.append("")
             md.append(f"- **Type**: {boundary.type.value}")
@@ -929,7 +920,7 @@ def generate_threat_model_markdown(state: ThreatModelState) -> str:
             "Criticality | Owner |"
         )
         md.append("|---|---|---|---|---|---|---|---|")
-        for asset_id, asset in assets.items():
+        for asset in assets.values():
             criticality = str(asset.criticality) if asset.criticality else "N/A"
             owner = asset.owner or "N/A"
             lifecycle = asset.lifecycle_state.value if asset.lifecycle_state else "N/A"
@@ -946,7 +937,7 @@ def generate_threat_model_markdown(state: ThreatModelState) -> str:
         md.append("")
         md.append("| ID | Asset | Source | Destination | Protocol | Encrypted | Risk Level |")
         md.append("|---|---|---|---|---|---|---|")
-        for flow_id, flow in flows.items():
+        for flow in flows.values():
             # Find asset name
             asset_name = "Unknown"
             if flow.asset_id in state.assets:
@@ -955,7 +946,11 @@ def generate_threat_model_markdown(state: ThreatModelState) -> str:
             protocol = flow.protocol or "N/A"
             encrypted = "Yes" if flow.encryption else "No"
             risk_level = str(flow.risk_level) if flow.risk_level else "N/A"
-            md.append(f"| {flow.id} | {asset_name} | {flow.source_id} | {flow.destination_id} | {protocol} | {encrypted} | {risk_level} |")
+            md.append(
+                f"| {flow.id} | {asset_name} | {node_label(flow.source_id)} | "
+                f"{node_label(flow.destination_id)} | {protocol} | {encrypted} | "
+                f"{risk_level} |"
+            )
         md.append("")
 
     if not assets and not flows:
@@ -968,7 +963,7 @@ def generate_threat_model_markdown(state: ThreatModelState) -> str:
     if state.threats:
         # Group threats by status
         threats_by_status = {}
-        for threat_id, threat in state.threats.items():
+        for threat in state.threats.values():
             status = threat.status.value if threat.status else "threatIdentified"
             if status not in threats_by_status:
                 threats_by_status[status] = []
@@ -998,6 +993,36 @@ def generate_threat_model_markdown(state: ThreatModelState) -> str:
                     md.append(f"- **Impacted Assets**: {', '.join(threat.impactedAssets)}")
                 if threat.tags:
                     md.append(f"- **Tags**: {', '.join(threat.tags)}")
+                assessment = state.residual_risk_assessments.get(threat.id)
+                if assessment:
+                    from threat_modeling_mcp_server.tools.threat_generator import (
+                        is_residual_assessment_current,
+                    )
+
+                    md.append(
+                        f"- **Residual Risk Decision**: {assessment.decision.value}"
+                    )
+                    if assessment.residual_severity:
+                        md.append(
+                            "- **Residual Severity**: "
+                            f"{assessment.residual_severity.value}"
+                        )
+                    if assessment.residual_likelihood:
+                        md.append(
+                            "- **Residual Likelihood**: "
+                            f"{assessment.residual_likelihood.value}"
+                        )
+                    md.append(
+                        f"- **Residual Risk Rationale**: {assessment.rationale}"
+                    )
+                    md.append(
+                        "- **Assessment State**: "
+                        + (
+                            "Current"
+                            if is_residual_assessment_current(threat.id)
+                            else "Stale"
+                        )
+                    )
                 md.append("")
     else:
         md.append("*No threats defined.*")
@@ -1009,7 +1034,7 @@ def generate_threat_model_markdown(state: ThreatModelState) -> str:
     if state.mitigations:
         # Group mitigations by status
         mitigations_by_status = {}
-        for mitigation_id, mitigation in state.mitigations.items():
+        for mitigation in state.mitigations.values():
             status = mitigation.status.value if mitigation.status else "mitigationIdentified"
             if status not in mitigations_by_status:
                 mitigations_by_status[status] = []
@@ -1049,7 +1074,7 @@ def generate_threat_model_markdown(state: ThreatModelState) -> str:
     md.append("## Assumptions")
     md.append("")
     if state.assumptions:
-        for assumption_id, assumption in state.assumptions.items():
+        for assumption in state.assumptions.values():
             md.append(f"### A{assumption.id.replace('A', '')}: {assumption.category}")
             md.append("")
             md.append(f"**Description**: {assumption.description}")
@@ -1102,132 +1127,3 @@ def generate_threat_model_markdown(state: ThreatModelState) -> str:
     md.append("")
 
     return "\n".join(md)
-
-
-def export_comprehensive_threat_model_with_extended_data(output_path: str) -> str:
-    """Export comprehensive threat model with all extended data to a separate file.
-
-    This function creates a separate export with all the extended data that's not
-    compatible with standard Threat Composer but useful for comprehensive analysis.
-
-    Args:
-        output_path: Path to save the exported threat model
-
-    Returns:
-        Confirmation message with export details
-    """
-    logger.info(f"Starting comprehensive threat model export with extended data to {output_path}")
-
-    # Collect all state
-    state = collect_all_state()
-
-    # Normalize the output path to be in .threatmodel directory
-    normalized_path = normalize_output_path(output_path)
-
-    # Ensure the path ends with .json
-    if not normalized_path.endswith('.json'):
-        normalized_path += '.json'
-
-    # Add "_extended" to the filename
-    base_name = os.path.splitext(os.path.basename(normalized_path))[0]
-    extended_filename = f"{base_name}_extended.json"
-
-    # Create the .threatmodel directory if it doesn't exist
-    threatmodel_dir = os.path.join(os.path.dirname(normalized_path), '.threatmodel')
-    os.makedirs(threatmodel_dir, exist_ok=True)
-
-    # Update the path to be in .threatmodel directory
-    final_path = os.path.join(threatmodel_dir, extended_filename)
-
-    # Create comprehensive threat model with ALL data
-    threat_model = ThreatModel(schema=1)
-
-    # Set application info from business context
-    if state.business_context and state.business_context.description:
-        threat_model.applicationInfo = {
-            "name": "Threat Model Export (Extended)",
-            "description": state.business_context.description
-        }
-
-    # Convert and add core Threat Composer data
-    threat_model.assumptions = convert_assumptions_to_threat_composer_format(state.assumptions)
-    threat_model.threats = convert_threats_to_threat_composer_format(state.threats)
-    threat_model.mitigations = convert_mitigations_to_threat_composer_format(state.mitigations)
-
-    # Add links
-    threat_model.mitigationLinks = [link.dict() for link in state.mitigation_links]
-
-    # Add extended data (shared with the standard export)
-    extended = build_extended_export_data(state)
-    threat_model.businessContext = extended["businessContext"]
-    threat_model.components = extended["components"]
-    threat_model.connections = extended["connections"]
-    threat_model.dataStores = extended["dataStores"]
-    threat_model.threatActors = extended["threatActors"]
-    threat_model.trustZones = extended["trustZones"]
-    threat_model.crossingPoints = extended["crossingPoints"]
-    threat_model.trustBoundaries = extended["trustBoundaries"]
-    threat_model.assets = extended["assets"]
-    threat_model.flows = extended["flows"]
-    threat_model.softwareProfile = extended["softwareProfile"]
-    threat_model.dataAssetProfiles = extended["dataAssetProfiles"]
-    threat_model.userPersonas = extended["userPersonas"]
-    threat_model.nonFunctionalRequirements = extended["nonFunctionalRequirements"]
-    threat_model.phaseProgress = extended["phaseProgress"]
-    threat_model.referenceCatalogue = extended["referenceCatalogue"]
-
-    # Add metadata
-    threat_model.metadata = {
-        "export_timestamp": datetime.now().isoformat(),
-        "export_version": "1.0",
-        "total_threats": len(state.threats),
-        "total_mitigations": len(state.mitigations),
-        "total_assumptions": len(state.assumptions),
-        "total_components": len(state.components),
-        "total_assets": len(state.assets),
-        "includes_extended_data": True
-    }
-
-    # Write to file
-    try:
-        with open(final_path, "w", encoding="utf-8") as f:
-            json.dump(threat_model.dict(), f, indent=2, ensure_ascii=False)
-
-        logger.info(f"Successfully exported extended threat model to {final_path}")
-
-        # Generate summary
-        summary = f"""
-# Extended Threat Model Export Complete
-
-**Export Path**: {final_path}
-**Export Timestamp**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-
-## Export Summary
-- **Threats**: {len(state.threats)}
-- **Mitigations**: {len(state.mitigations)}
-- **Assumptions**: {len(state.assumptions)}
-- **Components**: {len(state.components)}
-- **Assets**: {len(state.assets)}
-- **Threat Actors**: {count_reviewed(state.threat_actors)}
-- **Trust Zones**: {len(state.trust_zones)}
-- **Data Stores**: {len(state.data_stores)}
-
-## Current Phase
-- **Phase**: {state.current_phase} - {state.phases.get(state.current_phase, 'Unknown')}
-- **Overall Completion**: {sum(state.phase_completion.values()) / len(state.phase_completion) * 100:.1f}%
-
-## File Details
-- **Format**: Extended Threat Model JSON (with all global variables)
-- **Schema Version**: 1
-- **Extended Data**: Included
-- **File Size**: {os.path.getsize(final_path)} bytes
-
-This extended file contains all global variables and extended data for comprehensive analysis.
-"""
-
-        return summary.strip()
-
-    except Exception as e:
-        error_msg = f"Failed to export extended threat model: {str(e)}"
-        logger.error(error_msg)
-        return error_msg

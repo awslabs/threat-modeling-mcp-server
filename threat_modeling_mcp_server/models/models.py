@@ -5,7 +5,7 @@ circular dependencies.
 """
 
 from enum import Enum
-from typing import Dict, List, Optional, Set, Any
+from typing import Optional, Set
 from pydantic import BaseModel, Field, model_validator
 
 
@@ -138,17 +138,6 @@ class GeographicProfile(BaseModel):
     compute_location: Optional[GeographicScope] = None
     user_base_location: Optional[GeographicScope] = None
     organizational_headquarters: Optional[GeographicScope] = None
-
-
-class ClarificationQuestion(BaseModel):
-    """Model for a clarification question."""
-    id: str
-    question: str
-    feature: str
-    enum_values: Optional[Dict[str, str]] = None  # Map of enum value to description
-    enum_type: Optional[str] = None  # Name of the enum type
-    answered: bool = False
-    answer: Optional[str] = None
 
 
 class BusinessContext(BaseModel):

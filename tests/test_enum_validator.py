@@ -5,9 +5,6 @@ from enum import Enum
 
 from threat_modeling_mcp_server.validation.enum_validator import (
     validate_enum_with_enhanced_error,
-    create_enhanced_enum_error,
-    get_current_enum_values,
-    discover_enum_classes_fresh,
 )
 from threat_modeling_mcp_server.models.data_classification_models import (
     InformationContentType,
@@ -113,84 +110,18 @@ class TestCanonicalCombinedLabels:
         assert "PCI-DSS" in str(exc.value)
 
 
-class TestCreateEnhancedEnumError:
-    """Tests for create_enhanced_enum_error function."""
+class TestDataModelRegistry:
+    """The one production enum registry exposes unique enum classes."""
 
-    def test_error_includes_invalid_value(self):
-        """Test that error message includes the invalid value."""
-        error = create_enhanced_enum_error("BadValue", SampleEnum)
-        assert "BadValue" in error
-
-    def test_error_includes_enum_class_name(self):
-        """Test that error message includes the enum class name."""
-        error = create_enhanced_enum_error("BadValue", SampleEnum)
-        assert "SampleEnum" in error
-
-
-class TestDiscoverEnumClassesFresh:
-    """Tests for discover_enum_classes_fresh function."""
-
-    def test_discovers_threat_category_enum(self):
-        """Test that ThreatCategory enum is discovered."""
-        enums = discover_enum_classes_fresh()
-        assert "ThreatCategory" in enums
-
-    def test_discovers_threat_severity_enum(self):
-        """Test that ThreatSeverity enum is discovered."""
-        enums = discover_enum_classes_fresh()
-        assert "ThreatSeverity" in enums
-
-    def test_discovers_component_type_enum(self):
-        """Test that ComponentType enum is discovered."""
-        enums = discover_enum_classes_fresh()
-        assert "ComponentType" in enums
-
-    def test_discovers_service_provider_enum(self):
-        """Test that ServiceProvider enum is discovered."""
-        enums = discover_enum_classes_fresh()
-        assert "ServiceProvider" in enums
-
-    def test_discovered_classes_are_enum_subclasses(self):
-        """Test that all discovered classes are Enum subclasses."""
-        enums = discover_enum_classes_fresh()
-        for name, enum_class in enums.items():
-            assert issubclass(enum_class, Enum), f"{name} is not an Enum subclass"
-
-
-    def test_discovers_classification_profile_enums_without_duplicates(self):
-        """Both registries expose every profile enum exactly once."""
+    def test_discovers_profile_enums_without_duplicates(self):
         from threat_modeling_mcp_server.tools.data_model_types import DATA_MODELS
 
-        fresh = discover_enum_classes_fresh()
-        for name in ("SoftwareType", "DataStructuralCategory", "UserPersonaType",
-                     "QualityClass"):
+        for name in (
+            "SoftwareType",
+            "DataStructuralCategory",
+            "UserPersonaType",
+            "QualityClass",
+        ):
             assert name in DATA_MODELS
-            assert name in fresh
+        assert all(issubclass(enum_class, Enum) for enum_class in DATA_MODELS.values())
         assert len(DATA_MODELS) == len(set(DATA_MODELS.values()))
-
-
-class TestGetCurrentEnumValues:
-    """Tests for get_current_enum_values function."""
-
-    def test_returns_values_for_known_enum(self):
-        """Test that values are returned for a known enum class."""
-        values = get_current_enum_values("ThreatCategory")
-        assert len(values) > 0
-        assert "Spoofing" in values
-
-    def test_returns_empty_for_unknown_enum(self):
-        """Test that empty list is returned for unknown enum class."""
-        values = get_current_enum_values("NonExistentEnum")
-        assert values == []
-
-    def test_threat_status_values(self):
-        """Test ThreatStatus enum values are returned correctly."""
-        values = get_current_enum_values("ThreatStatus")
-        assert "threatIdentified" in values
-        assert "threatResolved" in values
-
-    def test_mitigation_status_values(self):
-        """Test MitigationStatus enum values are returned correctly."""
-        values = get_current_enum_values("MitigationStatus")
-        assert "mitigationIdentified" in values
-        assert "mitigationResolved" in values

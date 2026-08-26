@@ -2,7 +2,7 @@
 
 from enum import Enum
 from typing import Dict, List, Optional
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 from threat_modeling_mcp_server.validation.enum_validator import validate_enum_with_enhanced_error
 
 
@@ -84,7 +84,7 @@ class ThreatActor(BaseModel):
     motivations: List[Motivation]
     resources: ResourceLevel
     description: Optional[str] = None
-    priority: int = 0  # 1-10 ranking, 0 means not ranked
+    priority: int = Field(default=0, ge=0, le=10)
     is_relevant: bool = True  # Whether this threat actor is relevant to the system
 
     # Whether this actor has been assessed for THIS system, as opposed to merely
@@ -138,11 +138,11 @@ class ThreatActor(BaseModel):
         return validate_enum_with_enhanced_error(v, ResourceLevel, 'resources')
 
 
-class ThreatActorLibrary(BaseModel):
-    """Model for the threat actor library."""
-    actors: Dict[str, ThreatActor] = {}
+class ThreatActorLibrary:
+    """Factory for the default threat actor catalogue."""
 
-    def get_default_actors(self) -> Dict[str, ThreatActor]:
+    @staticmethod
+    def get_default_actors() -> Dict[str, ThreatActor]:
         """Get a set of default threat actors.
 
         Covers twelve of the thirteen taxonomy actor types. OTHER is omitted

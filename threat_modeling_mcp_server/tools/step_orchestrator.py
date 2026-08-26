@@ -4,11 +4,15 @@ This module provides tools for orchestrating the steps of the threat modeling pr
 including detailed guidance for each phase and automated execution of certain steps.
 """
 
-from typing import Dict, List, Optional, Any
+from typing import Any, Dict, Literal, Optional
 from loguru import logger
 from mcp.server.fastmcp import Context
 from pydantic import Field
-from .threat_model_plan import detect_code_in_directory, has_code_files
+from .threat_model_plan import (
+    detect_code_in_directory,
+    generate_threat_modeling_plan,
+    has_code_files,
+)
 
 # Phase status tracking
 PHASES = {
@@ -24,8 +28,30 @@ PHASES = {
     9: "Output Generation and Documentation"
 }
 
+PhaseSelection = Literal[
+    "current", "1", "2", "3", "4", "5", "6", "7", "7.5", "8", "9",
+]
+WorkflowAction = Literal[
+    "describe", "plan", "guidance", "status", "set_project", "advance",
+    "progress",
+]
+
+PHASE_BY_SELECTION = {
+    "1": 1,
+    "2": 2,
+    "3": 3,
+    "4": 4,
+    "5": 5,
+    "6": 6,
+    "7": 7,
+    "7.5": 7.5,
+    "8": 8,
+    "9": 9,
+}
+
 # Track completion status of each phase
 phase_completion = {phase: 0.0 for phase in PHASES.keys()}
+phase_blocking_reasons = {phase: [] for phase in PHASES.keys()}
 current_phase = 1
 
 # Whether the last detect_phase_completion() call succeeded. When detection
@@ -95,50 +121,32 @@ def detect_phase_completion() -> None:
     try:
         state = get_state_summary()
 
-        from threat_modeling_mcp_server.tools.threat_generator import threats
-
+        readiness = state["phase_readiness"]
+        phase_7_5_complete = (
+            state.get('code_validation', {}).get('is_complete', False)
+            or not phase_7_5_applicable()
+        )
         computed = {
-            # Phase 1: Business Context Analysis. Same definition as
-            # manage_system_context(action="validate", section="business").
-            1: state['business_context'].get('is_complete', False),
-            # Phase 2: Architecture Analysis
-            2: state['architecture']['components'] > 0,
-            # Phase 3: Threat Actor Analysis. Counted from actors the agent
-            # has reviewed, not every actor present: the default library is
-            # pre-loaded at startup, so a plain count reported this phase
-            # complete before any analysis had happened.
-            3: state['reviewed_threat_actors'] > 0,
-            # Phase 4: Trust Boundary Analysis
-            4: state['trust_boundaries']['trust_zones'] > 0,
-            # Phase 5: Asset Flow Analysis
-            5: state['asset_flows']['assets'] > 0,
-            # Phase 6: Threat Identification
-            6: state['threats_mitigations']['threats'] > 0,
-            # Phase 7: Mitigation Planning
-            7: (
-                state['threats_mitigations']['mitigations'] > 0
-                and state['threats_mitigations']['mitigation_links'] > 0
-            ),
-            # Phase 7.5: Code Validation Analysis (optional)
-            7.5: state.get('code_validation', {}).get('is_complete', False) or not phase_7_5_applicable(),
-            # Phase 8: Residual Risk Analysis
-            8: any(
-                threat.status
-                and threat.status.value in ('threatResolved', 'threatResolvedNotUseful')
-                for threat in threats.values()
-            ),
-            # Phase 9: Output Generation and Documentation
-            9: (
-                state['threats_mitigations']['threats'] > 0
-                and state['threats_mitigations']['mitigations'] > 0
-                and state['architecture']['components'] > 0
-                and state['business_context']['has_description']
-            ),
+            phase: readiness[str(phase)]["is_complete"]
+            for phase in (1, 2, 3, 4, 5, 6, 7, 8, 9)
         }
+        computed[7.5] = phase_7_5_complete
 
         # Commit all phases together so completion always reflects one snapshot.
         for phase, is_complete in computed.items():
             phase_completion[phase] = 1.0 if is_complete else 0.0
+            if phase == 7.5:
+                phase_blocking_reasons[phase] = (
+                    []
+                    if is_complete
+                    else [
+                        "Run code validation for the configured project directory."
+                    ]
+                )
+            else:
+                phase_blocking_reasons[phase] = list(
+                    readiness[str(phase)]["blocking_reasons"]
+                )
 
         last_detection_error = None
 
@@ -204,13 +212,20 @@ async def advance_phase_impl(ctx) -> str:
             f"{phase_completion.get(phase, 0.0):.0%}"
             for phase in blocking
         )
+        reasons = phase_blocking_reasons.get(earliest, [])
+        missing = (
+            "\n\nMissing work:\n- " + "\n- ".join(reasons)
+            if reasons
+            else ""
+        )
         return (
             f"❌ Cannot advance: phase {earliest} "
             f"({PHASES.get(earliest, 'Unknown')}) is not complete.\n\n"
-            f"Incomplete phases up to the current one: {detail}.\n\n"
+            f"Incomplete phases up to the current one: {detail}."
+            f"{missing}\n\n"
             f"Completion is detected from the work recorded so far. Use "
-            f"get_current_phase_status() to see what is missing, then complete "
-            f"the outstanding items and try again."
+            f'manage_workflow(action="status") to see what is missing, then '
+            f"complete the outstanding items and try again."
         )
 
     phases = sorted(PHASES.keys())
@@ -235,7 +250,7 @@ async def advance_phase_impl(ctx) -> str:
         return (
             skipped_note
             + f"Advanced to phase: {current_phase} - {PHASES[current_phase]}\n\n"
-            + get_phase_guidance(current_phase)
+            + await get_phase_guidance_impl(str(current_phase))
         )
 
     return (
@@ -244,7 +259,7 @@ async def advance_phase_impl(ctx) -> str:
     )
 
 
-def get_phase_guidance(phase_number: float) -> str:
+def build_phase_guidance(phase_number: float) -> str:
     """Get detailed guidance for a specific phase.
 
     Args:
@@ -304,7 +319,7 @@ non-functional requirement.
 
 ## Next Steps
 After completing Phase 1, proceed to Phase 2:
-**Use `get_phase_2_guidance()` to continue with Architecture Analysis**
+**Use `manage_workflow(action="guidance", phase="2")` to continue with Architecture Analysis**
 """
 
     # Phase 2: Architecture Analysis
@@ -336,10 +351,10 @@ Document the system architecture to understand what components need to be protec
    - What internal dependencies exist?
 
 ## Tools to Use
-- `add_component`: Add a new component to the architecture
-- `add_connection`: Add a new connection between components
-- `add_data_store`: Add a new data store
-- `get_architecture_analysis_plan`: Get a plan to analyze the architecture
+- `manage_architecture(action="describe", section=SECTION)`: Get exact fields
+- `manage_architecture(action="add", section=SECTION, values=RECORD)`: Add records
+- `manage_architecture(action="list", section="all")`: Review the architecture
+- `manage_architecture(action="plan", section="all")`: Get analysis guidance
 
 ## Expected Outputs
 - System component diagram
@@ -347,9 +362,13 @@ Document the system architecture to understand what components need to be protec
 - Entry point inventory
 - Dependency map
 
+## Completion Gate
+At least one component or data store must exist. Every architecture node must
+participate in a connection, except for a valid single-node model.
+
 ## Next Steps
 After completing Phase 2, proceed to Phase 3:
-**Use `get_phase_3_guidance()` to continue with Threat Actor Analysis**
+**Use `manage_workflow(action="guidance", phase="3")` to continue with Threat Actor Analysis**
 """
 
     # Phase 3: Threat Actor Analysis
@@ -376,10 +395,10 @@ Identify potential threat actors who might target the system.
    - What are their typical targets?
 
 ## Tools to Use
-- `add_threat_actor`: Add a new threat actor
-- `set_threat_actor_relevance`: Set whether a threat actor is relevant
-- `set_threat_actor_priority`: Set the priority of a threat actor
-- `analyze_threat_actors`: Analyze the threat actors
+- `manage_threat_actors(action="list")`: Review default and custom actors
+- `manage_threat_actors(action="update", item_id=ID, values=ASSESSMENT)`: Set relevance and priority
+- `manage_threat_actors(action="add", values=ACTOR)`: Add a custom actor
+- `manage_threat_actors(action="analyze")`: Analyze the actors
 
 ## Expected Outputs
 - List of relevant threat actors
@@ -388,7 +407,7 @@ Identify potential threat actors who might target the system.
 
 ## Next Steps
 After completing Phase 3, proceed to Phase 4:
-**Use `get_phase_4_guidance()` to continue with Trust Boundary Analysis**
+**Use `manage_workflow(action="guidance", phase="4")` to continue with Trust Boundary Analysis**
 """
 
     # Phase 4: Trust Boundary Analysis
@@ -413,20 +432,24 @@ Identify trust boundaries within the system where security controls should be ap
    - What security controls exist at these crossing points?
 
 ## Tools to Use
-- `add_trust_zone`: Add a new trust zone
-- `add_component_to_zone`: Add a component to a trust zone
-- `add_crossing_point`: Add a new crossing point between trust zones
-- `add_trust_boundary`: Add a new trust boundary
-- `get_trust_boundary_detection_plan`: Get a plan to detect trust boundaries
+- `manage_trust_boundaries(action="detection_plan", section="all")`: Get detection guidance
+- `manage_trust_boundaries(action="add", section=SECTION, values=RECORD)`: Add zones, crossings, or boundaries
+- `manage_trust_boundaries(action="link", section="zones", values={{"zone_id": ZONE_ID, "node_id": NODE_ID}})`: Assign component or data-store nodes
+- `manage_trust_boundaries(action="link", section="crossing_points", values=LINK)`: Assign connections
 
 ## Expected Outputs
 - Trust zone diagram
 - Trust boundary documentation
 - Crossing point inventory
 
+## Completion Gate
+Every architecture node belongs to exactly one zone. Each inter-zone connection
+maps to exactly one matching crossing point, and every crossing point belongs to
+a trust boundary. No crossing is needed for communication within one zone.
+
 ## Next Steps
 After completing Phase 4, proceed to Phase 5:
-**Use `get_phase_5_guidance()` to continue with Asset Flow Analysis**
+**Use `manage_workflow(action="guidance", phase="5")` to continue with Asset Flow Analysis**
 """
 
     # Phase 5: Asset Flow Analysis
@@ -453,17 +476,20 @@ Identify and analyze the flow of valuable assets through the system.
    - What protections exist for assets?
 
 ## Tools to Use
-- `add_asset`: Add a new asset to the system
-- `add_flow`: Add a new asset flow
+- `manage_asset_flows(action="add", section="assets", values=ASSET)`: Add an asset
+- `manage_asset_flows(action="add", section="flows", values=FLOW)`: Add an asset flow
 
 ## Expected Outputs
 - Asset inventory
 - Asset flow diagram
 - Asset exposure assessment
 
+## Completion Gate
+Assets and flows must exist, and every asset must participate in a flow.
+
 ## Next Steps
 After completing Phase 5, proceed to Phase 6:
-**Use `get_phase_6_guidance()` to continue with Threat Identification**
+**Use `manage_workflow(action="guidance", phase="6")` to continue with Threat Identification**
 """
 
     # Phase 6: Threat Identification
@@ -490,8 +516,8 @@ Identify potential threats to the system based on the previous analysis.
    - Which threats would have the highest impact?
 
 ## Tools to Use
-- `add_threat`: Add a new threat to the model
-- `list_threats`: List all threats in the model
+- `manage_threats(action="add", section="threats", values=THREAT)`: Add a threat
+- `manage_threats(action="list", section="threats")`: List all threats
 
 ## Expected Outputs
 - Comprehensive threat list
@@ -500,7 +526,7 @@ Identify potential threats to the system based on the previous analysis.
 
 ## Next Steps
 After completing Phase 6, proceed to Phase 7:
-**Use `get_phase_7_guidance()` to continue with Mitigation Planning**
+**Use `manage_workflow(action="guidance", phase="7")` to continue with Mitigation Planning**
 """
 
     # Phase 7: Mitigation Planning
@@ -527,17 +553,20 @@ Develop mitigations for the identified threats.
    - What is the timeline?
 
 ## Tools to Use
-- `add_mitigation`: Add a new mitigation to the model
-- `link_mitigation_to_threat`: Link a mitigation to a threat
+- `manage_threats(action="add", section="mitigations", values=MITIGATION)`: Add a mitigation
+- `manage_threats(action="link", section="mitigations", items=LINKS)`: Batch mitigation-to-threat links; use `values=LINK` for one
 
 ## Expected Outputs
 - Mitigation strategies for each threat
 - Implementation plan
 - Responsibility assignments
 
+## Completion Gate
+Every threat has at least one valid mitigation link.
+
 ## Next Steps
 After completing Phase 7, proceed to Phase 7.5:
-**Use `get_phase_7_5_guidance()` to continue with Code Validation Analysis**
+**Use `manage_workflow(action="guidance", phase="7.5")` to continue with Code Validation Analysis**
 """
 
     # Phase 7.5: Code Validation Analysis
@@ -561,10 +590,11 @@ and update their statuses from those findings.
 
 Use `action="get"` to review progress and `action="clear"` when starting a new
 validation. Observed implementation details belong in finding evidence; use
-`add_assumption()` only for statements that remain assumptions.
+`manage_assumptions(action="add", values=ASSUMPTION)` only for statements that
+remain assumptions.
 
 ## Tools to Use
-- `manage_code_validation()`: Describe, record, review, validate, report, or clear findings
+- `manage_code_validation(action="describe")`: Load the contract, then record, review, validate, report, or clear findings
 
 ## Expected Outputs
 - Evidence for every current threat and mitigation
@@ -574,7 +604,7 @@ validation. Observed implementation details belong in finding evidence; use
 
 ## Next Steps
 After completing Phase 7.5, proceed to Phase 8:
-**Use `get_phase_8_guidance()` to continue with Residual Risk Analysis**
+**Use `manage_workflow(action="guidance", phase="8")` to continue with Residual Risk Analysis**
 """
 
     # Phase 8: Residual Risk Analysis
@@ -587,42 +617,44 @@ Analyze remaining risks after mitigations are applied and make risk acceptance d
 
 ## Steps
 1. **Review All Threats and Mitigations**
-   - Use `list_threats()` to get complete threat inventory
-   - Use `list_mitigations()` to get complete mitigation inventory
+   - Use `manage_threats(action="list", section="all")` for the complete inventory
    - Review current status of each threat
    - Identify unmitigated or partially mitigated threats
 
 2. **Assess Residual Risk for Each Threat**
-   - Use `get_threat(id)` for each threat to evaluate remaining risk
-   - Consider likelihood and impact of residual risk after mitigations
-   - Document risk assessment rationale
+   - Use `manage_threats(action="get", section="threats", item_id=ID)` for each threat
+   - Choose Open, Accepted, Mitigated, or Not Applicable
+   - Record residual severity, likelihood, and rationale
 
 3. **Make Risk Acceptance Decisions**
-   - Use `update_threat(id, status, ...)` to update threat status
-   - Mark threats as: threatResolved, threatResolvedNotUseful
-   - Document business justification for each decision
+   - Use `manage_threats(action="assess", section="threats", items=ASSESSMENTS)` for an atomic batch
+   - Each item requires `threat_id`, `decision`, and `rationale`
+   - Residual severity and likelihood are required except for Not Applicable
+   - Threat Composer statuses are derived from the decision
 
 4. **Document Risk Assumptions**
-   - Use `add_assumption()` to document assumptions about residual risks
+   - Use `manage_assumptions(action="add", values=ASSUMPTION)`
    - Include business risk tolerance decisions
    - Record risk acceptance criteria
 
 ## Tools to Use
-- `list_threats()`: Get complete inventory of threats
-- `list_mitigations()`: Get complete inventory of mitigations
-- `get_threat(id)`: Get detailed information about specific threats
-- `update_threat(id, status, ...)`: Update threat status based on risk decisions
-- `add_assumption()`: Document risk acceptance assumptions
+- `manage_threats(action="list", section="all")`: Review threats and mitigations
+- `manage_threats(action="assess", section="threats", items=ASSESSMENTS)`: Record residual-risk decisions
+- `manage_assumptions(action="add", values=ASSUMPTION)`: Document risk acceptance assumptions
 
 ## Expected Outputs
 - Complete residual risk assessment
-- Updated threat statuses with justifications
+- Current decision, ratings, and rationale for every threat
 - Risk acceptance documentation
 - Business risk tolerance assumptions
 
+## Completion Gate
+Every current threat has a non-stale residual-risk assessment. Changes to the
+threat or its linked mitigations require reassessment.
+
 ## Next Steps
 After completing Phase 8, proceed to Phase 9:
-**Use `get_phase_9_guidance()` to continue with Output Generation and Documentation**
+**Use `manage_workflow(action="guidance", phase="9")` to continue with Output Generation and Documentation**
 """
 
     # Phase 9: Output Generation and Documentation
@@ -635,14 +667,15 @@ Generate final documentation and outputs for integration with development proces
 
 ## Steps
 1. **Export Comprehensive Threat Model**
-   - Use `export_comprehensive_threat_model(output_path)` to export complete threat model with all global variables
+   - Use `export_threat_model(output_path="threat_model.json")` to choose a filename, or omit `output_path` for a timestamped name
    - Include all components, threats, mitigations, business context, assumptions, and phase progress
    - Include current threat and mitigation statuses, including updates made during code validation
    - Compatible with AWS Threat Composer and includes extended data
+   - Both JSON and Markdown must succeed for the current model
 
 2. **Generate Summary Reports**
-   - Use `get_threat_model_progress()` to create progress summary
-   - Use `list_assumptions()` to document all assumptions
+   - Use `manage_workflow(action="progress")` to create progress summary
+   - Use `manage_assumptions(action="list")` to document all assumptions
    - Create executive summary of threat modeling process
    - Document key findings and recommendations
 
@@ -652,10 +685,10 @@ Generate final documentation and outputs for integration with development proces
    - Create verification criteria for each mitigation
 
 ## Tools to Use
-- `export_comprehensive_threat_model(output_path)`: Export the complete model, including current threat and mitigation statuses
-- `get_threat_model_progress()`: Get progress metrics and completion status
-- `list_assumptions()`: Get all documented assumptions
-- `list_mitigations()`: Get all mitigations for implementation planning
+- `export_threat_model(output_path="threat_model.json")`: Export the complete model, including current threat and mitigation statuses
+- `manage_workflow(action="progress")`: Get progress metrics and completion status
+- `manage_assumptions(action="list")`: Get all documented assumptions
+- `manage_threats(action="list", section="mitigations")`: Get mitigations for implementation planning
 
 ## Expected Outputs
 - Comprehensive Threat Composer JSON export with all global variables
@@ -663,6 +696,10 @@ Generate final documentation and outputs for integration with development proces
 - Executive summary document
 - Implementation recommendations
 - Security requirements documentation
+
+## Completion Gate
+The most recent successful two-file export matches the current model fingerprint.
+Any later model change reopens this phase.
 """
 
     # Unknown phase
@@ -670,45 +707,90 @@ Generate final documentation and outputs for integration with development proces
         return f"# Phase {phase_number}: {phase_name}\n\nNo detailed guidance available for this phase."
 
 
-async def execute_final_export(ctx: Context) -> str:
-    """Execute the complete final export step.
+async def get_phase_guidance_impl(
+    phase: str = "current",
+    directory: Optional[str] = None,
+) -> str:
+    """Return guidance for an explicit phase or the tracked current phase."""
+    if phase == "current":
+        requested_phase = current_phase
+    else:
+        requested_phase = PHASE_BY_SELECTION.get(phase)
+        if requested_phase is None:
+            choices = ", ".join(("current", *PHASE_BY_SELECTION))
+            return f"Invalid phase: {phase}. Choose one of: {choices}."
 
-    Args:
-        ctx: MCP context for logging and error handling
+    logger.info(
+        f"Providing guidance for Phase {requested_phase}: "
+        f"{PHASES[requested_phase]}"
+    )
+    guidance = build_phase_guidance(requested_phase)
 
-    Returns:
-        A markdown-formatted report of the export results
-    """
-    logger.info("Executing final export step")
+    if requested_phase != 7:
+        return guidance
 
-    from threat_modeling_mcp_server.utils.comprehensive_exporter import export_comprehensive_threat_model
-    from threat_modeling_mcp_server.utils.state_collector import get_state_summary
+    search_directory = directory or project_directory
+    code_detected = await detect_code_in_directory(search_directory)
+    logger.info(
+        f"Code detected in directory '{search_directory}': {code_detected}"
+    )
+
+    if code_detected:
+        next_steps = """## Next Steps
+After completing Phase 7, proceed to Phase 7.5 for code validation:
+**Use `manage_workflow(action="guidance", phase="7.5")` to continue with Code Validation Analysis**
+
+*Code files were detected in your project, so Phase 7.5 (Code Validation Analysis) will help validate which security controls are already implemented in your codebase and update the threat model accordingly.*"""
+    else:
+        next_steps = """## Next Steps
+After completing Phase 7, proceed directly to Phase 8:
+**Use `manage_workflow(action="guidance", phase="8")` to continue with Residual Risk Analysis**
+
+*No code files were detected in your project, so Phase 7.5 (Code Validation Analysis) is being skipped. Proceeding directly to residual risk analysis.*"""
+
+    return guidance.replace(
+        """## Next Steps
+After completing Phase 7, proceed to Phase 7.5:
+**Use `manage_workflow(action="guidance", phase="7.5")` to continue with Code Validation Analysis**""",
+        next_steps,
+    )
+
+
+async def export_threat_model_impl(
+    ctx: Context,
+    output_path: Optional[str] = None,
+    include_extended_data: bool = True,
+) -> str:
+    """Export the model and return a state summary."""
     from datetime import datetime
 
+    from threat_modeling_mcp_server.utils.comprehensive_exporter import (
+        export_threat_model_files,
+    )
+    from threat_modeling_mcp_server.utils.state_collector import get_state_summary
+
+    logger.info("Exporting threat model")
+
     try:
-        # Generate timestamp for unique filename
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-        # Export comprehensive threat model
-        comprehensive_export_result = export_comprehensive_threat_model(
-            f"comprehensive_threat_model_{timestamp}.json",
-            include_extended_data=True
+        requested_path = (
+            output_path
+            or f"comprehensive_threat_model_{timestamp}.json"
         )
-
-
-        # Get state summary
+        export_result = export_threat_model_files(
+            requested_path,
+            include_extended_data=include_extended_data,
+        )
         state_summary = get_state_summary()
 
-        # Generate final report
         report = f"""
-# Final Export Step Complete
+# Threat Model Export Complete
 
 **Execution Timestamp**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 
 ## Export Results
 
-### Comprehensive Export
-{comprehensive_export_result}
+{export_result}
 
 ## State Summary
 - **Business Context**: {'✅ Set' if state_summary['business_context']['has_description'] else '❌ Not Set'} ({state_summary['business_context']['features_set']}/{state_summary['business_context'].get('features_total', 'n/a')} features configured)
@@ -723,24 +805,17 @@ async def execute_final_export(ctx: Context) -> str:
 - **Phase**: {state_summary['progress']['current_phase']} - {state_summary['progress']['current_phase_name']}
 - **Overall Completion**: {state_summary['progress']['overall_completion']:.1%}
 
-## Files Generated
-The comprehensive threat model file has been generated in the `.threatmodel` directory with all global variables and extended data. The file is compatible with AWS Threat Composer and ready for import into threat modeling tools or for further analysis.
+The JSON and Markdown files were written to the `.threatmodel` directory
+adjacent to the requested output path.
 """
-
         return report.strip()
+    except Exception as exc:
+        error_message = f"Failed to export threat model: {exc}"
+        logger.error(error_message)
+        return error_message
 
-    except Exception as e:
-        error_msg = f"Failed to execute final export step: {str(e)}"
-        logger.error(error_msg)
-        return error_msg
 
-
-# Named with the _impl suffix, like advance_phase_impl below, because
-# register_tools defines a `get_current_phase_status` tool closure. Sharing the
-# name meant the closure shadowed this function from its own scope, so the tool
-# raised "missing 1 required positional argument: 'ctx'" on every call --
-# including when an agent followed advance_phase's own advice to call it.
-def get_current_phase_status_impl() -> Dict[str, Any]:
+def get_workflow_status() -> Dict[str, Any]:
     """Get the current phase status and completion progress.
 
     Returns:
@@ -757,346 +832,216 @@ def get_current_phase_status_impl() -> Dict[str, Any]:
         "current_phase_name": PHASES.get(auto_current_phase, "Unknown"),
         "current_phase_completion": phase_completion.get(auto_current_phase, 0.0),
         "overall_completion": sum(phase_completion.values()) / len(phase_completion),
+        "blocking_reasons": list(
+            phase_blocking_reasons.get(auto_current_phase, [])
+        ),
         "phases": {phase: {"name": name, "completion": phase_completion.get(phase, 0.0)} 
                   for phase, name in PHASES.items()}
     }
 
 
-# Register tools with the MCP server
-def register_tools(mcp):
-    """Register step orchestration tools with the MCP server.
+def format_workflow_status() -> str:
+    """Render a compact workflow status."""
+    status = get_workflow_status()
+    result = "# Workflow Status\n\n"
+    result += (
+        f"**Current Phase:** {status['current_phase']} - "
+        f"{status['current_phase_name']}\n\n"
+    )
+    result += (
+        f"**Current Phase Completion:** "
+        f"{status['current_phase_completion']:.0%}\n\n"
+    )
+    result += f"**Overall Completion:** {status['overall_completion']:.0%}\n"
+    if status["blocking_reasons"]:
+        result += "\n**Missing Work:**\n"
+        for reason in status["blocking_reasons"]:
+            result += f"- {reason}\n"
+    return result
 
-    Args:
-        mcp: The MCP server instance
-    """
-    @mcp.tool()
-    async def get_phase_1_guidance(ctx: Context) -> str:
-        """Get detailed guidance for Phase 1: Business Context Analysis.
 
-        This tool provides step-by-step guidance for conducting business context analysis,
-        including objectives, steps, tools to use, and expected outputs.
+def build_workflow_progress() -> str:
+    """Render detailed progress for every workflow phase."""
+    logger.info("Getting threat modeling progress")
+    detect_phase_completion()
+    auto_current_phase = get_current_phase_auto()
+    total_phases = len(PHASES)
+    completed_count = sum(
+        1 for completion in phase_completion.values() if completion >= 1.0
+    )
+    overall_percentage = int((completed_count / total_phases) * 100)
 
-        Args:
-            ctx: MCP context for logging and error handling
+    result = "# Threat Modeling Progress\n\n"
+    result += (
+        f"**Overall Progress:** {overall_percentage}% "
+        f"({completed_count}/{total_phases} phases completed)\n\n"
+    )
+    result += (
+        f"**Current Phase:** {auto_current_phase} - "
+        f"{PHASES.get(auto_current_phase, 'Unknown')}\n\n"
+    )
+    result += "## Phase Status\n\n"
 
-        Returns:
-            A markdown-formatted guide for Phase 1
-        """
-        logger.info("Providing guidance for Phase 1: Business Context Analysis")
-        return get_phase_guidance(1)
-
-    @mcp.tool()
-    async def get_phase_2_guidance(ctx: Context) -> str:
-        """Get detailed guidance for Phase 2: Architecture Analysis.
-
-        This tool provides step-by-step guidance for conducting architecture analysis,
-        including objectives, steps, tools to use, and expected outputs.
-
-        Args:
-            ctx: MCP context for logging and error handling
-
-        Returns:
-            A markdown-formatted guide for Phase 2
-        """
-        logger.info("Providing guidance for Phase 2: Architecture Analysis")
-        return get_phase_guidance(2)
-
-    @mcp.tool()
-    async def get_phase_3_guidance(ctx: Context) -> str:
-        """Get detailed guidance for Phase 3: Threat Actor Analysis.
-
-        This tool provides step-by-step guidance for conducting threat actor analysis,
-        including objectives, steps, tools to use, and expected outputs.
-
-        Args:
-            ctx: MCP context for logging and error handling
-
-        Returns:
-            A markdown-formatted guide for Phase 3
-        """
-        logger.info("Providing guidance for Phase 3: Threat Actor Analysis")
-        return get_phase_guidance(3)
-
-    @mcp.tool()
-    async def get_phase_4_guidance(ctx: Context) -> str:
-        """Get detailed guidance for Phase 4: Trust Boundary Analysis.
-
-        This tool provides step-by-step guidance for conducting trust boundary analysis,
-        including objectives, steps, tools to use, and expected outputs.
-
-        Args:
-            ctx: MCP context for logging and error handling
-
-        Returns:
-            A markdown-formatted guide for Phase 4
-        """
-        logger.info("Providing guidance for Phase 4: Trust Boundary Analysis")
-        return get_phase_guidance(4)
-
-    @mcp.tool()
-    async def get_phase_5_guidance(ctx: Context) -> str:
-        """Get detailed guidance for Phase 5: Asset Flow Analysis.
-
-        This tool provides step-by-step guidance for conducting asset flow analysis,
-        including objectives, steps, tools to use, and expected outputs.
-
-        Args:
-            ctx: MCP context for logging and error handling
-
-        Returns:
-            A markdown-formatted guide for Phase 5
-        """
-        logger.info("Providing guidance for Phase 5: Asset Flow Analysis")
-        return get_phase_guidance(5)
-
-    @mcp.tool()
-    async def get_phase_6_guidance(ctx: Context) -> str:
-        """Get detailed guidance for Phase 6: Threat Identification.
-
-        This tool provides step-by-step guidance for conducting threat identification,
-        including objectives, steps, tools to use, and expected outputs.
-
-        Args:
-            ctx: MCP context for logging and error handling
-
-        Returns:
-            A markdown-formatted guide for Phase 6
-        """
-        logger.info("Providing guidance for Phase 6: Threat Identification")
-        return get_phase_guidance(6)
-
-    @mcp.tool()
-    async def get_phase_7_guidance(ctx: Context, directory: str = ".") -> str:
-        """Get detailed guidance for Phase 7: Mitigation Planning.
-
-        This tool provides step-by-step guidance for conducting mitigation planning,
-        including objectives, steps, tools to use, and expected outputs. The next steps
-        are conditional based on whether code is detected in the project.
-
-        Args:
-            ctx: MCP context for logging and error handling
-            directory: Directory to check for code files (default: current directory)
-
-        Returns:
-            A markdown-formatted guide for Phase 7 with conditional next steps
-        """
-        logger.info("Providing guidance for Phase 7: Mitigation Planning")
-
-        # Check if code exists in the directory
-        code_detected = await detect_code_in_directory(directory)
-        logger.info(f"Code detected in directory '{directory}': {code_detected}")
-
-        # Get base Phase 7 guidance
-        base_guidance = get_phase_guidance(7)
-
-        # Replace the "Next Steps" section with conditional logic
-        if code_detected:
-            next_steps = """## Next Steps
-After completing Phase 7, proceed to Phase 7.5 for code validation:
-**Use `get_phase_7_5_guidance()` to continue with Code Validation Analysis**
-
-*Code files were detected in your project, so Phase 7.5 (Code Validation Analysis) will help validate which security controls are already implemented in your codebase and update the threat model accordingly.*"""
+    for phase_number in sorted(PHASES):
+        phase_name = PHASES[phase_number]
+        completion = phase_completion.get(phase_number, 0.0)
+        if completion >= 1.0:
+            status = "✅ Completed"
+        elif phase_number == auto_current_phase:
+            status = "🔄 In Progress"
         else:
-            next_steps = """## Next Steps
-After completing Phase 7, proceed directly to Phase 8:
-**Use `get_phase_8_guidance()` to continue with Residual Risk Analysis**
+            status = "⏳ Pending"
+        result += f"- **Phase {phase_number}: {phase_name}:** {status}\n"
+        if completion < 1.0:
+            for reason in phase_blocking_reasons.get(phase_number, []):
+                result += f"  - Missing: {reason}\n"
 
-*No code files were detected in your project, so Phase 7.5 (Code Validation Analysis) is being skipped. Proceeding directly to residual risk analysis.*"""
+    return result
 
-        # Replace the existing next steps section
-        updated_guidance = base_guidance.replace(
-            """## Next Steps
-After completing Phase 7, proceed to Phase 7.5:
-**Use `get_phase_7_5_guidance()` to continue with Code Validation Analysis**""",
-            next_steps
+
+def workflow_guide() -> str:
+    """Describe the consolidated workflow actions."""
+    return """# Workflow Manager
+
+Actions:
+- `describe`: Show this action guide
+- `plan`: Complete methodology; accepts `directory` and `auto_validate_code`
+- `guidance`: Focused phase guidance; accepts `phase` and optional `directory`
+- `status`: Compact current-phase status
+- `set_project`: Record the project path in `directory`
+- `advance`: Advance only when all phases through the current phase are complete
+- `progress`: Detailed status for every phase
+
+Use `export_threat_model` for JSON and Markdown output.
+"""
+
+
+async def manage_workflow_impl(
+    ctx: Context,
+    action: str,
+    phase: Optional[str] = None,
+    directory: Optional[str] = None,
+    auto_validate_code: Optional[bool] = None,
+) -> str:
+    """Dispatch one workflow operation."""
+    action = action.strip().lower()
+    valid_actions = {
+        "describe", "plan", "guidance", "status", "set_project", "advance",
+        "progress",
+    }
+    if action not in valid_actions:
+        return (
+            f"❌ Unknown workflow action '{action}'. Valid actions: "
+            + ", ".join(sorted(valid_actions))
         )
 
-        return updated_guidance
+    allowed_arguments = {
+        "describe": set(),
+        "plan": {"directory", "auto_validate_code"},
+        "guidance": {"phase", "directory"},
+        "status": set(),
+        "set_project": {"directory"},
+        "advance": set(),
+        "progress": set(),
+    }
+    supplied_arguments = {
+        name for name, value in {
+            "phase": phase,
+            "directory": directory,
+            "auto_validate_code": auto_validate_code,
+        }.items()
+        if value is not None
+    }
+    unexpected = supplied_arguments - allowed_arguments[action]
+    if unexpected:
+        return (
+            f"❌ action='{action}' does not accept: "
+            + ", ".join(sorted(unexpected))
+        )
 
-    @mcp.tool()
-    async def get_phase_7_5_guidance(ctx: Context) -> str:
-        """Get detailed guidance for Phase 7.5: Code Validation Analysis.
-
-        This tool provides step-by-step guidance for conducting code validation analysis,
-        including objectives, steps, tools to use, and expected outputs.
-
-        Args:
-            ctx: MCP context for logging and error handling
-
-        Returns:
-            A markdown-formatted guide for Phase 7.5
-        """
-        logger.info("Providing guidance for Phase 7.5: Code Validation Analysis")
-        return get_phase_guidance(7.5)
-
-    @mcp.tool()
-    async def get_phase_8_guidance(ctx: Context) -> str:
-        """Get detailed guidance for Phase 8: Residual Risk Analysis.
-
-        This tool provides step-by-step guidance for conducting residual risk analysis,
-        including objectives, steps, tools to use, and expected outputs.
-
-        Args:
-            ctx: MCP context for logging and error handling
-
-        Returns:
-            A markdown-formatted guide for Phase 8
-        """
-        logger.info("Providing guidance for Phase 8: Residual Risk Analysis")
-        return get_phase_guidance(8)
-
-    @mcp.tool()
-    async def get_phase_9_guidance(ctx: Context) -> str:
-        """Get detailed guidance for Phase 9: Output Generation and Documentation.
-
-        This tool provides step-by-step guidance for generating outputs and documentation,
-        including objectives, steps, tools to use, and expected outputs.
-
-        Args:
-            ctx: MCP context for logging and error handling
-
-        Returns:
-            A markdown-formatted guide for Phase 9
-        """
-        logger.info("Providing guidance for Phase 9: Output Generation and Documentation")
-        return get_phase_guidance(9)
-
-    @mcp.tool()
-    async def execute_final_export_step(ctx: Context) -> str:
-        """Execute the complete final export step (Phase 9) automatically.
-
-        This tool automates the final export step, generating all required documentation
-        and outputs from the threat modeling process.
-
-        Args:
-            ctx: MCP context for logging and error handling
-
-        Returns:
-            A markdown-formatted report of the export results
-        """
-        logger.info("Executing final export step (Phase 9)")
-        return await execute_final_export(ctx)
-
-    @mcp.tool()
-    async def get_current_phase_status(ctx: Context) -> Dict[str, Any]:
-        """Get the current phase status and completion progress.
-
-        This tool provides information about the current phase of the threat modeling
-        process and the completion progress of each phase.
-
-        Args:
-            ctx: MCP context for logging and error handling
-
-        Returns:
-            A dictionary with current phase information and completion percentages
-        """
-        logger.info("Getting current phase status")
-        return get_current_phase_status_impl()
-
-    @mcp.tool()
-    async def follow_threat_modeling_plan(ctx: Context, phase: str = None) -> str:
-        """Follow the threat modeling plan.
-
-        This tool guides the user through the threat modeling process step by step,
-        following the plan generated by the get_threat_modeling_plan tool.
-
-        Args:
-            ctx: MCP context for logging and error handling
-            phase: Optional phase to get guidance for (if not provided, will use current phase)
-
-        Returns:
-            A markdown-formatted guide for the current or specified phase
-        """
-        global current_phase
-
-        logger.info(f"Following threat modeling plan for phase: {phase if phase else current_phase}")
-
-        # If a specific phase is requested, use that
-        if phase:
-            try:
-                requested_phase = float(phase)
-                if requested_phase not in PHASES:
-                    return f"Invalid phase: {phase}. Please specify one of: {', '.join([str(p) for p in PHASES.keys()])}"
-            except ValueError:
-                return f"Invalid phase format: {phase}. Please specify a numeric phase like '1', '2', '7.5', etc."
-        else:
-            requested_phase = current_phase
-
-        return get_phase_guidance(requested_phase)
-
-    @mcp.tool()
-    async def set_project_directory_tool(
-        ctx: Context,
-        directory: str = Field(description="Path to the project being threat modeled, for example '/repos/my-service'"),
-    ) -> str:
-        """Record which directory holds the project under review.
-
-        Phase 7.5 (Code Validation Analysis) only applies when there is source
-        code to validate. That is decided by searching this directory, which
-        defaults to the server's working directory. Set it when the project
-        lives elsewhere, otherwise phase 7.5 may be skipped incorrectly.
-        """
-        logger.info(f"Setting project directory: {directory}")
+    if action == "describe":
+        return workflow_guide()
+    if action == "plan":
+        return await generate_threat_modeling_plan(
+            ctx,
+            directory or project_directory,
+            True if auto_validate_code is None else auto_validate_code,
+        )
+    if action == "guidance":
+        return await get_phase_guidance_impl(phase or "current", directory)
+    if action == "status":
+        return format_workflow_status()
+    if action == "set_project":
+        if not directory:
+            return "❌ action='set_project' requires directory."
         return set_project_directory(directory)
-
-    @mcp.tool()
-    async def advance_phase(ctx: Context) -> str:
-        """Advance to the next phase of the threat modeling process.
-
-        Refuses to advance while the current phase is incomplete.
-
-        Args:
-            ctx: MCP context for logging and error handling
-
-        Returns:
-            A confirmation message and guidance for the new phase
-        """
+    if action == "advance":
         return await advance_phase_impl(ctx)
+    return build_workflow_progress()
+
+
+def register_tools(mcp):
+    """Register the consolidated workflow and export tools."""
 
     @mcp.tool()
-    async def get_threat_model_progress(ctx: Context) -> str:
-        """Get the current progress of the threat modeling process.
+    async def manage_workflow(
+        ctx: Context,
+        action: WorkflowAction = Field(
+            description=(
+                "Operation: describe, plan, guidance, status, set_project, "
+                "advance, or progress"
+            ),
+        ),
+        phase: Optional[PhaseSelection] = Field(
+            default=None,
+            description=(
+                "Phase for action='guidance': current, 1, 2, 3, 4, 5, 6, "
+                "7, 7.5, 8, or 9"
+            ),
+        ),
+        directory: Optional[str] = Field(
+            default=None,
+            description=(
+                "Project directory for plan, guidance, or set_project"
+            ),
+        ),
+        auto_validate_code: Optional[bool] = Field(
+            default=None,
+            description=(
+                "For action='plan', include Phase 7.5 when code is detected; "
+                "defaults to true"
+            ),
+        ),
+    ) -> str:
+        """Plan, guide, inspect, configure, or advance the workflow."""
+        return await manage_workflow_impl(
+            ctx,
+            action,
+            phase,
+            directory,
+            auto_validate_code,
+        )
 
-        This tool returns the current progress of the threat modeling process,
-        including completed phases and the current phase.
-
-        Args:
-            ctx: MCP context for logging and error handling
-
-        Returns:
-            A markdown-formatted progress report
-        """
-        logger.info("Getting threat modeling progress")
-
-        # Update phase completion based on actual work done
-        detect_phase_completion()
-
-        # Get the current phase automatically
-        auto_current_phase = get_current_phase_auto()
-
-        result = "# Threat Modeling Progress\n\n"
-
-        # Calculate overall progress
-        total_phases = len(PHASES)
-        completed_count = sum(1 for completion in phase_completion.values() if completion >= 1.0)
-        overall_percentage = int((completed_count / total_phases) * 100)
-
-        result += f"**Overall Progress:** {overall_percentage}% ({completed_count}/{total_phases} phases completed)\n\n"
-        result += f"**Current Phase:** {auto_current_phase} - {PHASES.get(auto_current_phase, 'Unknown')}\n\n"
-
-        result += "## Phase Status\n\n"
-
-        for phase_num in sorted(PHASES.keys()):
-            phase_name = PHASES[phase_num]
-            completion = phase_completion.get(phase_num, 0.0)
-
-            if completion >= 1.0:
-                status = "✅ Completed"
-            elif phase_num == auto_current_phase:
-                status = "🔄 In Progress"
-            else:
-                status = "⏳ Pending"
-
-            result += f"- **Phase {phase_num}: {phase_name}:** {status}\n"
-
-        return result
+    @mcp.tool()
+    async def export_threat_model(
+        ctx: Context,
+        output_path: Optional[str] = Field(
+            default=None,
+            description=(
+                "Requested output path; omit for a timestamped filename"
+            ),
+        ),
+        include_extended_data: bool = Field(
+            default=True,
+            description=(
+                "Include architecture, taxonomy profiles, workflow progress, "
+                "and other server extensions"
+            ),
+        ),
+    ) -> str:
+        """Export Threat Composer JSON and Markdown plus a state summary."""
+        return await export_threat_model_impl(
+            ctx,
+            output_path,
+            include_extended_data,
+        )

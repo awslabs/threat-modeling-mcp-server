@@ -1,6 +1,6 @@
 ---
 name: phase-8-residual-risk
-description: Phase 8 Residual Risk Analysis guide. Use when assessing remaining risk after mitigations, making risk acceptance decisions, or updating final threat statuses.
+description: Phase 8 Residual Risk Analysis guide. Use when assessing remaining risk after mitigations and recording explicit risk decisions.
 ---
 
 # Phase 8: Residual Risk Analysis
@@ -11,14 +11,14 @@ Assess what risk remains after all mitigations are applied. Make explicit risk a
 ## Tools Reference
 
 ### Review Tools
-- `list_threats()` -- Get all threats with current status
-- `list_mitigations()` -- Get all mitigations with status
-- `get_threat(id)` -- Detailed view including linked mitigations
-- `get_mitigation(id)` -- Detailed view including linked threats
+- `manage_threats(action="list", section="all")` -- Get all threats and mitigations
+- `manage_threats(action="get", section="threats", item_id=ID)` -- Threat details and links
+- `manage_threats(action="get", section="mitigations", item_id=ID)` -- Mitigation details and links
 
 ### Decision Tools
-- `update_threat(id, status=...)` -- Set final threat status
-- `add_assumption(description, category, impact, rationale)` -- Document risk acceptance
+- `manage_threats(action="assess", section="threats", values=ASSESSMENT)` -- Record one decision
+- `manage_threats(action="assess", section="threats", items=ASSESSMENTS)` -- Record an atomic batch
+- `manage_assumptions(action="add", values=ASSUMPTION)` -- Document risk acceptance
 
 ## Risk Assessment Framework
 
@@ -30,51 +30,62 @@ For each threat, consider:
 4. **Residual impact**: If it still occurs, what's the damage?
 5. **Business tolerance**: Can the business accept this level of risk?
 
-## Final Threat Status Decisions
+An assessment contains `threat_id`, `decision`, `residual_severity`,
+`residual_likelihood`, and a non-empty `rationale`. Severity and likelihood are
+required except for `Not Applicable`.
 
-| Status | Criteria | Action |
+## Residual Risk Decisions
+
+| Decision | Criteria | Threat Composer status |
 |---|---|---|
-| `threatResolved` | Threat adequately mitigated by controls | Mark resolved with justification |
-| `threatResolvedNotUseful` | Threat not applicable to this system, or risk formally accepted | Mark with business justification |
-| `threatIdentified` (keep) | Threat still needs attention, controls insufficient | Document what's still needed |
+| `Mitigated` | Controls reduce risk to the required level | `threatResolved` |
+| `Accepted` | The business formally accepts the remaining risk | `threatResolved` |
+| `Open` | Controls are absent or insufficient | `threatIdentified` |
+| `Not Applicable` | The scenario does not apply to this system | `threatResolvedNotUseful` |
 
 ## Decision Guide
 
-### Mark as `threatResolved` when:
+### Choose `Mitigated` when:
 - Preventive controls fully address the threat vector
 - Detective + corrective controls provide adequate response
 - Code validation confirmed implementation
 - Industry-standard controls are in place
 
-### Mark as `threatResolvedNotUseful` when:
+### Choose `Not Applicable` when:
 - The threat scenario is unrealistic for this system
-- Business has formally accepted the risk with justification
 - The threat is blocked by architectural constraints
 
-### Keep as `threatIdentified` when:
+### Choose `Accepted` when:
+- The remaining severity and likelihood are understood
+- The accountable business owner accepts that residual exposure
+- The rationale records why no further control is required
+
+### Choose `Open` when:
 - Controls are planned but not implemented
 - Partial mitigation leaves significant residual risk
 - No cost-effective mitigation exists yet
 
 ## Workflow
 
-1. **Call `get_phase_8_guidance()`**
-2. **Call `list_threats()`** to get the full inventory
+1. **Call `manage_workflow(action="guidance", phase="8")`**
+2. **Call `manage_threats(action="list", section="threats")`** to get the full inventory
 3. **For each threat**:
-   a. Call `get_threat(id)` to see linked mitigations
+   a. Call `manage_threats(action="get", section="threats", item_id=ID)` to see linked mitigations
    b. Assess residual risk considering mitigation effectiveness
-   c. Call `update_threat(id, status=...)` with appropriate status
-4. **Document risk acceptance** with `add_assumption()`:
+   c. Build an assessment with the decision, residual ratings, and rationale
+4. **Save decisions atomically** with `manage_threats(action="assess", section="threats", items=ASSESSMENTS)`
+5. **Document broader risk assumptions** with `manage_assumptions(action="add", values=ASSUMPTION)`:
    - "Risk of DDoS accepted: CDN and auto-scaling provide adequate protection"
    - "SQL injection risk resolved: all database queries use parameterized statements"
-5. **Review summary** with `list_threats(status="threatIdentified")` to see remaining open risks
+6. **Review summary** with `manage_threats(action="list", section="threats")`; every assessment must show `Assessment State: Current`
 
 ## Completion Criteria
 - [ ] Every threat reviewed for residual risk
-- [ ] Final status set on each threat
+- [ ] Every threat has a current assessment with a decision and rationale
+- [ ] Residual severity and likelihood recorded except for Not Applicable threats
 - [ ] Risk acceptance assumptions documented with business justification
-- [ ] No threats left without a deliberate status decision
-- [ ] Call `advance_phase()` to proceed to Phase 9
+- [ ] No missing or stale assessments remain
+- [ ] Call `manage_workflow(action="advance")` to proceed to Phase 9
 
 ## Common Pitfalls
 - Marking all threats as resolved without justification

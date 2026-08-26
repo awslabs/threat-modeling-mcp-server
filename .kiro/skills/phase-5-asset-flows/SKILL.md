@@ -10,7 +10,10 @@ Identify every valuable asset in the system and track how it moves between compo
 
 ## Tools Reference
 
-### add_asset(name, type, classification, lifecycle_state, data_states, description, owner, criticality, metadata)
+Call `manage_asset_flows(action="describe", section=SECTION)` for the exact
+contract and enum values.
+
+### manage_asset_flows(action="add", section="assets", values=ASSET)
 | Parameter | Required | Values |
 |---|---|---|
 | name | Yes | e.g., "Credit Card Numbers" |
@@ -26,12 +29,12 @@ Link each data classification profile created in Phase 1 to the matching asset I
 Complete every applicable Data Classification dimension during this update. Use
 `action="add", section="data_assets"` only for data first discovered in this phase.
 
-### add_flow(asset_id, source_id, destination_id, transformation_type, controls, description, protocol, encryption, authenticated, authorized, validated, risk_level)
+### manage_asset_flows(action="add", section="flows", values=FLOW)
 | Parameter | Required | Values |
 |---|---|---|
-| asset_id | Yes | Asset ID from add_asset |
-| source_id | Yes | Component ID |
-| destination_id | Yes | Component ID |
+| asset_id | Yes | Asset ID from the asset add response |
+| source_id | Yes | Component or data-store node ID |
+| destination_id | Yes | Component or data-store node ID |
 | transformation_type | No | Encryption, Decryption, Processing, Aggregation, Anonymization, Pseudonymization, Tokenization, Hashing, Signing, Verification, Redaction, Other |
 | controls | No | List of: Encryption, Access Control, Authentication, Authorization, Audit Logging, Input Validation, Output Encoding, Integrity Check, Rate Limiting, Monitoring, Other |
 | encryption | No | true/false |
@@ -41,11 +44,11 @@ Complete every applicable Data Classification dimension during this update. Use
 | risk_level | No | 1-5 scale (5 = highest risk) |
 
 ### Other Phase 5 Tools
-- `list_assets()`, `list_flows()` -- Review current state
-- `get_asset(id)`, `get_flow(id)` -- Detailed view
-- `update_asset(...)`, `update_flow(...)` -- Atomically update a record
-- `delete_asset(id)`, `delete_flow(id)` -- Remove a record
-- `clear_asset_flows()` -- Clear all assets and flows
+- `manage_asset_flows(action="list", section="all")` -- Review current state
+- `manage_asset_flows(action="get", section=SECTION, item_id=ID)` -- Detailed view
+- `manage_asset_flows(action="update", section=SECTION, item_id=ID, values=UPDATES)` -- Atomically update
+- `manage_asset_flows(action="delete", section=SECTION, item_id=ID)` -- Remove a record
+- `manage_asset_flows(action="clear", section="all")` -- Clear all assets and flows
 - `manage_system_context(action="list", section="data_assets")` -- Match Phase 1 profiles to asset IDs
 
 To clear nullable values, pass `clear_fields` to an update. Asset fields that can be
@@ -79,19 +82,19 @@ Look for these in the codebase:
 
 ## Workflow
 
-1. **Call `get_phase_5_guidance()`**
+1. **Call `manage_workflow(action="guidance", phase="5")`**
 2. **Identify assets** from code analysis (env vars, database schemas, API payloads)
-3. **Add each asset** with classification (sensitivity tier), data states, and criticality
+3. **Add each asset** with `action="add", section="assets"` and include classification, data states, and criticality
 4. **Link data profiles** with `manage_system_context(action="update", section="data_assets", item_id=PROFILE_ID, values={"asset_id": ASSET_ID, ...})`; use `action="add"` only when no Phase 1 profile exists
-5. **Map flows** showing how each asset moves between components
+5. **Map flows** with `action="add", section="flows"` showing how each asset moves between component or data-store nodes
 6. **Document controls** on each flow (encryption, auth, validation)
 7. **Assign risk levels** based on the classification tier and protection gaps
 
 ## Completion Criteria
 - [ ] All valuable assets identified and classified
 - [ ] Data asset profiles linked to matching asset IDs without duplicates
-- [ ] Flows documented for each asset's movement through the system
+- [ ] At least one flow exists and every asset participates in a flow
 - [ ] Security controls documented on each flow
 - [ ] Risk levels assigned to all flows
 - [ ] High-risk flows (unprotected sensitive data) flagged
-- [ ] Call `advance_phase()` to proceed to Phase 6
+- [ ] Call `manage_workflow(action="advance")` to proceed to Phase 6

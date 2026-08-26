@@ -1,8 +1,6 @@
 """Batch operation utilities for the Threat Modeling MCP Server.
 
-This module provides helper functions for batch operations across all tools.
-Batch operations allow multiple items to be added, updated, or deleted in a single
-tool call while maintaining backwards compatibility with single-item operations.
+This module provides helper functions for processing either one item or a batch.
 """
 
 import inspect

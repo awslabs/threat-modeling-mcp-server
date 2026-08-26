@@ -59,12 +59,12 @@ def test_asset_flow_state_starts_empty():
 
 
 @pytest.mark.asyncio
-async def test_flows_require_existing_components_and_accept_case_insensitive_enums():
+async def test_flows_require_existing_nodes_and_accept_case_insensitive_enums():
     ctx = AsyncMock()
     asset_id = await add_asset(ctx)
 
     result = await asset_flows.add_flow_impl(ctx, asset_id, "C404", "C405")
-    assert result == "Source component with ID C404 not found"
+    assert result == "Source architecture node with ID C404 not found"
     assert asset_flows.flows == {}
 
     source_id, destination_id = await add_components(ctx)
@@ -123,7 +123,7 @@ async def test_flow_updates_are_atomic_and_enforce_risk_range():
     before = asset_flows.flows[flow_id].model_dump()
 
     result = await asset_flows.update_flow_impl(ctx, flow_id, source_id="C404")
-    assert result == "Source component with ID C404 not found"
+    assert result == "Source architecture node with ID C404 not found"
     assert asset_flows.flows[flow_id].model_dump() == before
 
     result = await asset_flows.update_flow_impl(
@@ -199,8 +199,8 @@ async def test_component_deletion_and_architecture_clear_preserve_flow_reference
 
     result = await architecture.delete_component_impl(ctx, source_id)
     assert result == (
-        f"Cannot delete component {source_id} because it is used in asset flows: "
-        f"{flow_id}"
+        f"Cannot delete component {source_id} because it is referenced by "
+        f"asset flows: {flow_id}."
     )
     assert source_id in architecture.components
 
@@ -209,6 +209,32 @@ async def test_component_deletion_and_architecture_clear_preserve_flow_reference
         f"Cannot clear architecture because it is used by asset flows: {flow_id}"
     )
     assert set(architecture.components) == {source_id, destination_id}
+
+
+@pytest.mark.asyncio
+async def test_flows_accept_data_store_nodes_and_render_node_names():
+    ctx = AsyncMock()
+    await architecture.add_component_impl(ctx, "API", "Compute")
+    await architecture.add_data_store_impl(
+        ctx,
+        "Customer Database",
+        "Relational",
+        "Confidential",
+    )
+    source_id = next(iter(architecture.components))
+    destination_id = next(iter(architecture.data_stores))
+    asset_id = await add_asset(ctx)
+
+    flow_id = await add_flow(ctx, asset_id, source_id, destination_id)
+    listed = await asset_flows.list_flows_impl(ctx, node_id=destination_id)
+    detailed = await asset_flows.get_flow_impl(ctx, flow_id)
+
+    assert f"API ({source_id})" in listed
+    assert f"Customer Database ({destination_id})" in listed
+    assert f"Customer Database ({destination_id})" in detailed
+
+    blocked = await architecture.delete_data_store_impl(ctx, destination_id)
+    assert f"asset flows: {flow_id}" in blocked
 
 
 @pytest.mark.asyncio
@@ -229,20 +255,25 @@ async def test_export_contains_project_assets_and_no_asset_catalogue():
 
 @pytest.mark.asyncio
 async def test_batch_items_accept_scalar_data_state():
-    result = await call("add_asset", items=[
-        {
-            "name": "Session token",
-            "type": "Credential",
-            "classification": "Restricted",
-            "data_states": "In transit",
-        },
-        {
-            "name": "Audit log",
-            "type": "Data",
-            "classification": "Internal",
-            "data_states": ["At rest", "In use"],
-        },
-    ])
+    result = await call(
+        "manage_asset_flows",
+        action="add",
+        section="assets",
+        items=[
+            {
+                "name": "Session token",
+                "type": "Credential",
+                "classification": "Restricted",
+                "data_states": "In transit",
+            },
+            {
+                "name": "Audit log",
+                "type": "Data",
+                "classification": "Internal",
+                "data_states": ["At rest", "In use"],
+            },
+        ],
+    )
 
     assert "Successfully added 2 asset(s)" in result
     by_name = {asset.name: asset for asset in asset_flows.assets.values()}
@@ -255,17 +286,19 @@ async def test_batch_items_accept_scalar_data_state():
 
 
 @pytest.mark.asyncio
-async def test_top_level_scalar_data_state_is_rejected_by_tool_schema():
-    from mcp.server.fastmcp.exceptions import ToolError
+async def test_manager_surfaces_invalid_data_state_values():
+    result = await call(
+        "manage_asset_flows",
+        action="add",
+        section="assets",
+        values={
+            "name": "Customer record",
+            "type": "Data",
+            "classification": "Internal",
+            "data_states": ["Somewhere"],
+        },
+    )
 
-    with pytest.raises(ToolError) as exc:
-        await call(
-            "add_asset",
-            name="Customer record",
-            type="Data",
-            classification="Internal",
-            data_states="At rest",
-        )
-
-    assert "data_states" in str(exc.value)
-    assert "valid list" in str(exc.value)
+    assert result.startswith("❌ asset failed:")
+    assert "data_states" in result
+    assert "Valid options are" in result

@@ -6,7 +6,7 @@ description: Phase 7.5 Code Validation guide. Use when validating threats and mi
 # Phase 7.5: Code Validation Analysis
 
 ## Objective
-Inspect the implementation and record evidence for every current threat and mitigation. This phase runs only when source code is detected in the project recorded with `set_project_directory_tool()`.
+Inspect the implementation and record evidence for every current threat and mitigation. This phase runs only when source code is detected in the project recorded with `manage_workflow(action="set_project")`.
 
 ## Tool
 
@@ -37,15 +37,17 @@ Mitigation outcomes:
 
 ## Workflow
 
-1. Call `get_phase_7_5_guidance()`.
+1. Call `manage_workflow(action="guidance", phase="7.5")`.
 2. Call `manage_code_validation(action="describe")`.
 3. Inspect the relevant files and identify concrete file, line, configuration, or test evidence.
 4. Call `manage_code_validation(action="record", values=FINDINGS)`. Findings may be submitted incrementally.
 5. Call `manage_code_validation(action="validate")`; record every missing or stale item.
 6. Call `manage_code_validation(action="report")` to finalize the current snapshot.
-7. Call `advance_phase()` to proceed to Phase 8.
+7. Call `manage_workflow(action="advance")` to proceed to Phase 8.
 
-Observed code behavior belongs in finding evidence. Use `add_assumption()` only when a statement remains unverified.
+Observed code behavior belongs in finding evidence. Use
+`manage_assumptions(action="add", values=ASSUMPTION)` only when a statement
+remains unverified.
 
 ## Completion Criteria
 - [ ] Every current threat has a fresh finding
@@ -53,4 +55,4 @@ Observed code behavior belongs in finding evidence. Use `add_assumption()` only 
 - [ ] Each finding contains concrete evidence or a not-applicable rationale
 - [ ] Validation reports complete coverage
 - [ ] The final report has been generated for the current snapshot
-- [ ] `advance_phase()` proceeds to Phase 8
+- [ ] `manage_workflow(action="advance")` proceeds to Phase 8

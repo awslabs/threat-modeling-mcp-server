@@ -1,14 +1,7 @@
 """Trust Boundary Detection functionality for the Threat Modeling MCP Server."""
 
-from typing import Dict, List, Set, Tuple, Optional
 from loguru import logger
 from mcp.server.fastmcp import Context
-from pydantic import Field
-
-from threat_modeling_mcp_server.models.trust_boundary_models import (
-    TrustZone, CrossingPoint, TrustBoundary, TrustLevel
-)
-from threat_modeling_mcp_server.models.architecture_models import Component, Connection
 
 
 async def get_trust_boundary_detection_plan_impl(
@@ -34,9 +27,9 @@ This plan provides a structured approach for detecting trust boundaries from arc
 ### Step 1: Gather Architecture Data
 First, collect all architecture information using the following tools:
 
-1. **Get Components**: Use `list_components()` to retrieve all system components
-2. **Get Connections**: Use `list_connections()` to retrieve all connections between components
-3. **Get Data Stores**: Use `list_data_stores()` to retrieve all data stores
+1. **Get Components**: Use `manage_architecture(action="list", section="components")`
+2. **Get Connections**: Use `manage_architecture(action="list", section="connections")`
+3. **Get Data Stores**: Use `manage_architecture(action="list", section="data_stores")`
 
 ### Step 2: LLM Trust Zone Detection Prompt
 Use the following prompt structure with an LLM to detect trust zones:
@@ -45,7 +38,7 @@ Use the following prompt structure with an LLM to detect trust zones:
 You are a cybersecurity expert analyzing system architecture to detect trust zones for threat modeling.
 
 ARCHITECTURE DATA:
-[Insert the output from list_components(), list_connections(), and list_data_stores() here]
+[Insert the output from manage_architecture list calls here]
 
 ANALYSIS INSTRUCTIONS:
 Analyze the architecture and identify logical trust zones based on:
@@ -64,19 +57,19 @@ Analyze the architecture and identify logical trust zones based on:
 
 3. **Network Topology Analysis**:
    - Consider network segmentation and isolation requirements
-   - Identify components in similar network contexts (DMZ, internal, etc.)
+   - Identify architecture nodes in similar network contexts (DMZ, internal, etc.)
    - Look for natural network boundaries and subnets
-   - Consider components with similar network exposure
+   - Consider components and data stores with similar network exposure
 
 4. **Trust Level Assessment**:
    For each identified zone, assess trust level based on:
-   - Data sensitivity handled by components in the zone
+   - Data sensitivity handled by architecture nodes in the zone
    - Exposure to external networks, internet, or untrusted users
    - Security controls and protections already in place
    - Criticality to business operations and potential impact of compromise
 
 5. **Zone Deduplication and Optimization**:
-   - Ensure each component belongs to exactly one primary trust zone
+   - Ensure each component and data store belongs to exactly one primary trust zone
    - Merge overlapping or redundant zones that don't add security value
    - Prioritize security-based groupings over generic technical groupings
    - Avoid over-segmentation that creates management overhead
@@ -96,14 +89,14 @@ Provide your analysis in the following structured format:
 
 ### Zone 1: [Descriptive Zone Name]
 - **Trust Level**: [Untrusted/Low/Medium/High]
-- **Components**: [List of component IDs that belong to this zone]
-- **Rationale**: [Detailed explanation of why these components belong together]
+- **Architecture Nodes**: [List of component and data-store IDs that belong to this zone]
+- **Rationale**: [Detailed explanation of why these nodes belong together]
 - **Security Characteristics**: [Key security attributes and requirements]
 - **Data Sensitivity**: [Types and sensitivity of data handled]
 
 ### Zone 2: [Descriptive Zone Name]
 - **Trust Level**: [Untrusted/Low/Medium/High]
-- **Components**: [List of component IDs]
+- **Architecture Nodes**: [List of component and data-store IDs]
 - **Rationale**: [Explanation of grouping logic]
 - **Security Characteristics**: [Security attributes]
 - **Data Sensitivity**: [Data types and sensitivity]
@@ -112,9 +105,9 @@ Provide your analysis in the following structured format:
 
 ## Trust Zone Summary
 - **Total zones detected**: [number]
-- **Components assigned**: [number assigned / total components]
-- **Unassigned components**: [list component IDs if any remain unassigned]
-- **Zone distribution**: [brief summary of how components are distributed across trust levels]
+- **Architecture nodes assigned**: [number assigned / total nodes]
+- **Unassigned architecture nodes**: [list node IDs if any remain unassigned]
+- **Zone distribution**: [brief summary of how nodes are distributed across trust levels]
 
 ## Recommendations
 - [Any recommendations for zone refinement or additional considerations]
@@ -130,7 +123,7 @@ TRUST ZONES IDENTIFIED:
 [Insert the trust zone results from Step 2 here]
 
 CONNECTION DATA:
-[Insert the connection data from list_connections() here]
+[Insert the connection data from manage_architecture(action="list", section="connections") here]
 
 CROSSING POINT ANALYSIS INSTRUCTIONS:
 For each connection that crosses trust zone boundaries, analyze:
@@ -257,10 +250,10 @@ OUTPUT FORMAT:
 ### Step 5: Implementation Guidance
 After completing the LLM analysis, use the following tools to implement the results:
 
-1. **Create Trust Zones**: Use `add_trust_zone(name, trust_level, description)` for each detected zone
-2. **Assign Components**: Use `add_component_to_zone(zone_id, component_id)` to assign components
-3. **Create Crossing Points**: Use `add_crossing_point(source_zone_id, destination_zone_id, auth_method, authz_method, description)`
-4. **Create Trust Boundaries**: Use `add_trust_boundary(name, type, crossing_point_ids, controls, description)`
+1. **Create Trust Zones**: Use `manage_trust_boundaries(action="add", section="zones", values=ZONE)`
+2. **Assign Architecture Nodes**: Use `manage_trust_boundaries(action="link", section="zones", values={"zone_id": ZONE_ID, "node_id": NODE_ID})`
+3. **Create Crossing Points**: Use `manage_trust_boundaries(action="add", section="crossing_points", values=CROSSING)`
+4. **Create Trust Boundaries**: Use `manage_trust_boundaries(action="add", section="boundaries", values=BOUNDARY)`
 
 ### Step 6: Validation and Refinement
 Use the validation guidance and manual tools to refine the detection results as needed.
@@ -301,8 +294,8 @@ Use the validation guidance and manual tools to refine the detection results as 
 
 ## Tools and Resources
 
-- **Architecture Tools**: list_components, list_connections, list_data_stores
-- **Trust Boundary Tools**: add_trust_zone, add_crossing_point, add_trust_boundary
+- **Architecture Tool**: manage_architecture
+- **Trust Boundary Tool**: manage_trust_boundaries
 - **AWS Documentation**: AWS Documentation MCP Server for validation
 - **Security Frameworks**: NIST Cybersecurity Framework, OWASP, industry standards
 
@@ -310,30 +303,3 @@ This plan ensures a thorough, AI-powered analysis of your architecture to detect
 """
     
     return result
-
-
-
-
-# Register tools with the MCP server
-def register_tools(mcp):
-    """Register trust boundary detection tools with the MCP server.
-    
-    Args:
-        mcp: The MCP server instance
-    """
-    @mcp.tool()
-    async def get_trust_boundary_detection_plan(
-        ctx: Context,
-    ) -> str:
-        """Get a comprehensive trust boundary detection plan.
-
-        This tool returns a detailed plan for detecting trust boundaries from architecture
-        components using AI-powered analysis with step-by-step prompts and guidance.
-
-        Args:
-            ctx: MCP context for logging and error handling
-
-        Returns:
-            A markdown-formatted plan with prompts for LLM-powered trust boundary detection
-        """
-        return await get_trust_boundary_detection_plan_impl(ctx)

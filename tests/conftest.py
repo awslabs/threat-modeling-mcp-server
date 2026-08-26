@@ -35,9 +35,11 @@ STATEFUL_GLOBALS = {
     "threat_modeling_mcp_server.tools.asset_flow_analyzer": ("assets", "flows"),
     "threat_modeling_mcp_server.tools.threat_generator": (
         "threats", "mitigations", "mitigation_links",
+        "residual_risk_assessments", "threat_counter", "mitigation_counter",
     ),
     "threat_modeling_mcp_server.tools.step_orchestrator": (
-        "phase_completion", "current_phase", "last_detection_error", "project_directory",
+        "phase_completion", "phase_blocking_reasons", "current_phase",
+        "last_detection_error", "project_directory",
     ),
     "threat_modeling_mcp_server.tools.code_security_validator": (
         "validation_project_directory", "threat_findings", "mitigation_findings",
@@ -45,6 +47,9 @@ STATEFUL_GLOBALS = {
     ),
     "threat_modeling_mcp_server.tools.classification_profiles": (
         "software_profile", "data_asset_profiles", "user_personas", "nfr_profile",
+    ),
+    "threat_modeling_mcp_server.utils.comprehensive_exporter": (
+        "last_successful_export_fingerprint", "last_successful_export_paths",
     ),
     # Monotonic id counters live here now, shared by every collection.
     "threat_modeling_mcp_server.utils.id_utils": ("_counters",),

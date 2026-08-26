@@ -1,26 +1,81 @@
 """Architecture Analysis functionality for the Cline Threat Modeling MCP Server."""
 
-from typing import Dict, List, Optional, Any
+from typing import Any, Dict, Optional, Union
 from loguru import logger
 from mcp.server.fastmcp import Context
-from pydantic import Field
-import uuid
 
 from threat_modeling_mcp_server.models.models import SensitivityTier
 from threat_modeling_mcp_server.models.architecture_models import (
-    Component, Connection, DataStore, Architecture,
+    Component, Connection, DataStore,
     ComponentType, ServiceProvider, Protocol, DataStoreType,
-    BackupFrequency, AWSService
+    BackupFrequency,
 )
-from threat_modeling_mcp_server.utils.batch_utils import batch_add, batch_update, batch_delete
 from threat_modeling_mcp_server.utils.id_utils import next_id
 
 
 # Global state
-architecture = Architecture()
 components: Dict[str, Component] = {}
 connections: Dict[str, Connection] = {}
 data_stores: Dict[str, DataStore] = {}
+
+
+ArchitectureNode = Union[Component, DataStore]
+
+
+def get_architecture_node(node_id: str) -> Optional[ArchitectureNode]:
+    """Return a component or data store by its architecture node ID."""
+    return components.get(node_id) or data_stores.get(node_id)
+
+
+def get_architecture_nodes() -> Dict[str, ArchitectureNode]:
+    """Return all architecture nodes keyed by ID."""
+    return {**components, **data_stores}
+
+
+def get_architecture_node_name(node_id: str) -> str:
+    """Return a display name for a component or data store ID."""
+    node = get_architecture_node(node_id)
+    return node.name if node else f"Unknown ({node_id})"
+
+
+def _node_reference_error(node_id: str, label: str) -> Optional[str]:
+    references = []
+
+    connection_ids = sorted(
+        connection.id
+        for connection in connections.values()
+        if node_id in (connection.source_id, connection.destination_id)
+    )
+    if connection_ids:
+        references.append(f"connections: {', '.join(connection_ids)}")
+
+    from threat_modeling_mcp_server.tools.asset_flow_analyzer import flows
+
+    flow_ids = sorted(
+        flow.id
+        for flow in flows.values()
+        if node_id in (flow.source_id, flow.destination_id)
+    )
+    if flow_ids:
+        references.append(f"asset flows: {', '.join(flow_ids)}")
+
+    from threat_modeling_mcp_server.tools.trust_boundary_analyzer import trust_zones
+
+    zone_ids = sorted(
+        zone.id
+        for zone in trust_zones.values()
+        if node_id in zone.contained_nodes
+    )
+    if zone_ids:
+        references.append(f"trust zones: {', '.join(zone_ids)}")
+
+    if not references:
+        return None
+    return (
+        f"Cannot delete {label} {node_id} because it is referenced by "
+        + "; ".join(references)
+        + "."
+    )
 
 
 async def add_component_impl(
@@ -67,9 +122,6 @@ async def add_component_impl(
     
     # Store the component
     components[component_id] = component
-    
-    # Update the architecture
-    architecture.components = list(components.values())
     
     return f"Component added with ID: {component_id}"
 
@@ -126,9 +178,6 @@ async def update_component_impl(
     
     # Store the updated component
     components[id] = component
-    
-    # Update the architecture
-    architecture.components = list(components.values())
     
     return f"Component {id} updated successfully."
 
@@ -204,28 +253,12 @@ async def delete_component_impl(
     if id not in components:
         return f"Component with ID {id} not found."
     
-    # Check if the component is used in any connections
-    for connection in connections.values():
-        if connection.source_id == id or connection.destination_id == id:
-            return f"Cannot delete component {id} because it is used in connection {connection.id}."
-
-    from threat_modeling_mcp_server.tools.asset_flow_analyzer import flows
-
-    related_flows = [
-        flow.id for flow in flows.values()
-        if flow.source_id == id or flow.destination_id == id
-    ]
-    if related_flows:
-        return (
-            f"Cannot delete component {id} because it is used in asset flows: "
-            + ", ".join(sorted(related_flows))
-        )
+    reference_error = _node_reference_error(id, "component")
+    if reference_error:
+        return reference_error
     
     # Delete the component
     del components[id]
-    
-    # Update the architecture
-    architecture.components = list(components.values())
     
     return f"Component {id} deleted successfully."
 
@@ -243,8 +276,8 @@ async def add_connection_impl(
     
     Args:
         ctx: MCP context for logging and error handling
-        source_id: ID of the source component
-        destination_id: ID of the destination component
+        source_id: ID of the source architecture node
+        destination_id: ID of the destination architecture node
         protocol: Protocol used for the connection
         port: Port used for the connection
         encryption: Whether the connection is encrypted
@@ -255,12 +288,11 @@ async def add_connection_impl(
     """
     logger.debug(f'Adding connection from {source_id} to {destination_id}')
     
-    # Check if the source and destination components exist
-    if source_id not in components:
-        return f"Source component with ID {source_id} not found."
+    if get_architecture_node(source_id) is None:
+        return f"Source architecture node with ID {source_id} not found."
     
-    if destination_id not in components:
-        return f"Destination component with ID {destination_id} not found."
+    if get_architecture_node(destination_id) is None:
+        return f"Destination architecture node with ID {destination_id} not found."
     
     # Generate a unique ID
     connection_id = next_id(connections, "CN")
@@ -278,9 +310,6 @@ async def add_connection_impl(
     
     # Store the connection
     connections[connection_id] = connection
-    
-    # Update the architecture
-    architecture.connections = list(connections.values())
     
     return f"Connection added with ID: {connection_id}"
 
@@ -300,8 +329,8 @@ async def update_connection_impl(
     Args:
         ctx: MCP context for logging and error handling
         id: ID of the connection to update
-        source_id: New ID of the source component
-        destination_id: New ID of the destination component
+        source_id: New ID of the source architecture node
+        destination_id: New ID of the destination architecture node
         protocol: New protocol used for the connection
         port: New port used for the connection
         encryption: New encryption status
@@ -319,13 +348,13 @@ async def update_connection_impl(
     
     # Update only the provided fields
     if source_id is not None:
-        if source_id not in components:
-            return f"Source component with ID {source_id} not found."
+        if get_architecture_node(source_id) is None:
+            return f"Source architecture node with ID {source_id} not found."
         connection.source_id = source_id
     
     if destination_id is not None:
-        if destination_id not in components:
-            return f"Destination component with ID {destination_id} not found."
+        if get_architecture_node(destination_id) is None:
+            return f"Destination architecture node with ID {destination_id} not found."
         connection.destination_id = destination_id
     
     if protocol is not None:
@@ -343,21 +372,18 @@ async def update_connection_impl(
     # Store the updated connection
     connections[id] = connection
     
-    # Update the architecture
-    architecture.connections = list(connections.values())
-    
     return f"Connection {id} updated successfully."
 
 
 async def list_connections_impl(
     ctx: Context,
-    component_id: Optional[str] = None,
+    node_id: Optional[str] = None,
 ) -> str:
     """List all connections in the architecture.
     
     Args:
         ctx: MCP context for logging and error handling
-        component_id: Optional component ID to filter connections
+        node_id: Optional architecture node ID to filter connections
         
     Returns:
         A markdown-formatted list of connections
@@ -368,20 +394,21 @@ async def list_connections_impl(
         return "No connections have been added yet."
     
     filtered_connections = connections.values()
-    if component_id:
-        filtered_connections = [c for c in filtered_connections if c.source_id == component_id or c.destination_id == component_id]
+    if node_id:
+        filtered_connections = [
+            connection
+            for connection in filtered_connections
+            if node_id in (connection.source_id, connection.destination_id)
+        ]
     
     if not filtered_connections:
-        return f"No connections found for component: {component_id}"
+        return f"No connections found for architecture node: {node_id}"
     
     result = "# Architecture Connections\n\n"
     
     for connection in filtered_connections:
-        source = components.get(connection.source_id, None)
-        destination = components.get(connection.destination_id, None)
-        
-        source_name = source.name if source else f"Unknown ({connection.source_id})"
-        destination_name = destination.name if destination else f"Unknown ({connection.destination_id})"
+        source_name = get_architecture_node_name(connection.source_id)
+        destination_name = get_architecture_node_name(connection.destination_id)
         
         result += f"## {connection.id}: {source_name} → {destination_name}\n\n"
         
@@ -418,12 +445,22 @@ async def delete_connection_impl(
     
     if id not in connections:
         return f"Connection with ID {id} not found."
+
+    from threat_modeling_mcp_server.tools.trust_boundary_analyzer import crossing_points
+
+    related_crossings = sorted(
+        crossing.id
+        for crossing in crossing_points.values()
+        if id in crossing.connection_ids
+    )
+    if related_crossings:
+        return (
+            f"Cannot delete connection {id} because it is referenced by crossing "
+            f"points: {', '.join(related_crossings)}."
+        )
     
     # Delete the connection
     del connections[id]
-    
-    # Update the architecture
-    architecture.connections = list(connections.values())
     
     return f"Connection {id} deleted successfully."
 
@@ -469,9 +506,6 @@ async def add_data_store_impl(
     
     # Store the data store
     data_stores[data_store_id] = data_store
-    
-    # Update the architecture
-    architecture.data_stores = list(data_stores.values())
     
     return f"Data store added with ID: {data_store_id}"
 
@@ -529,9 +563,6 @@ async def update_data_store_impl(
     
     # Store the updated data store
     data_stores[id] = data_store
-    
-    # Update the architecture
-    architecture.data_stores = list(data_stores.values())
     
     return f"Data store {id} updated successfully."
 
@@ -597,12 +628,13 @@ async def delete_data_store_impl(
     
     if id not in data_stores:
         return f"Data store with ID {id} not found."
+
+    reference_error = _node_reference_error(id, "data store")
+    if reference_error:
+        return reference_error
     
     # Delete the data store
     del data_stores[id]
-    
-    # Update the architecture
-    architecture.data_stores = list(data_stores.values())
     
     return f"Data store {id} deleted successfully."
 
@@ -630,9 +662,9 @@ This plan provides a structured approach for analyzing system architecture for s
 ### Step 1: Gather Architecture Data
 First, collect all architecture components using the following tools:
 
-1. **Get Components**: Use `list_components()` to retrieve all system components
-2. **Get Connections**: Use `list_connections()` to retrieve all component connections  
-3. **Get Data Stores**: Use `list_data_stores()` to retrieve all data storage elements
+1. **Get Components**: Use `manage_architecture(action="list", section="components")`
+2. **Get Connections**: Use `manage_architecture(action="list", section="connections")`
+3. **Get Data Stores**: Use `manage_architecture(action="list", section="data_stores")`
 
 ### Step 2: LLM Analysis Prompt
 Use the following prompt structure with an LLM to analyze the architecture:
@@ -641,7 +673,7 @@ Use the following prompt structure with an LLM to analyze the architecture:
 You are a cybersecurity expert analyzing a system architecture for security concerns. 
 
 ARCHITECTURE DATA:
-[Insert the output from list_components(), list_connections(), and list_data_stores() here]
+[Insert the output from manage_architecture list calls here]
 
 ANALYSIS INSTRUCTIONS:
 1. **Component Security Analysis**:
@@ -771,7 +803,7 @@ Combine the LLM analysis with AWS documentation validation to produce a comprehe
 
 ## Tools and Resources
 
-- **Architecture Tools**: list_components, list_connections, list_data_stores
+- **Architecture Tool**: manage_architecture
 - **AWS Documentation**: AWS Documentation MCP Server for validation
 - **Analysis Framework**: STRIDE, OWASP, NIST Cybersecurity Framework
 - **Compliance Standards**: SOC 2, ISO 27001, PCI DSS, GDPR (as applicable)
@@ -800,412 +832,36 @@ async def clear_architecture_impl(
     if flows:
         flow_ids = ", ".join(sorted(flows))
         return f"Cannot clear architecture because it is used by asset flows: {flow_ids}"
-    
-    global architecture, components, connections, data_stores
-    
-    architecture = Architecture()
-    components = {}
-    connections = {}
-    data_stores = {}
-    
+
+    from threat_modeling_mcp_server.tools.trust_boundary_analyzer import (
+        crossing_points,
+        trust_zones,
+    )
+
+    assigned_zone_ids = sorted(
+        zone.id for zone in trust_zones.values() if zone.contained_nodes
+    )
+    mapped_crossing_ids = sorted(
+        crossing.id
+        for crossing in crossing_points.values()
+        if crossing.connection_ids
+    )
+    if assigned_zone_ids or mapped_crossing_ids:
+        references = []
+        if assigned_zone_ids:
+            references.append(f"assigned trust zones: {', '.join(assigned_zone_ids)}")
+        if mapped_crossing_ids:
+            references.append(
+                f"mapped crossing points: {', '.join(mapped_crossing_ids)}"
+            )
+        return (
+            "Cannot clear architecture because it is referenced by "
+            + "; ".join(references)
+            + "."
+        )
+
+    components.clear()
+    connections.clear()
+    data_stores.clear()
+
     return "Architecture cleared."
-
-
-# Register tools with the MCP server
-def register_tools(mcp):
-    """Register architecture analysis tools with the MCP server.
-    
-    Args:
-        mcp: The MCP server instance
-    """
-    # Register component tools
-    @mcp.tool()
-    async def add_component(
-        ctx: Context,
-        name: str = Field(default=None, description="Name of the component (required for single item mode)"),
-        type: str = Field(default=None, description="Type of the component (e.g., 'Compute', 'Storage', 'Network') (required for single item mode)"),
-        service_provider: Optional[str] = Field(default=None, description="Provider of the service (e.g., 'AWS', 'Azure', 'GCP')"),
-        specific_service: Optional[str] = Field(default=None, description="Specific service name (e.g., 'EC2', 'S3', 'Lambda')"),
-        version: Optional[str] = Field(default=None, description="Version of the component"),
-        description: Optional[str] = Field(default=None, description="Description of the component"),
-        configuration: Optional[Dict[str, Any]] = Field(default=None, description="Configuration details of the component"),
-        items: Optional[List[Dict[str, Any]]] = Field(default=None, description="Optional list of components to add in batch. Each dict should contain 'name', 'type', and optionally 'service_provider', 'specific_service', 'version', 'description', 'configuration'. When provided, individual parameters are ignored."),
-    ) -> str:
-        """Add a new component to the architecture. Supports batch operations via the 'items' parameter.
-
-        This tool adds one or more components to the system architecture.
-        For single item: provide name, type, and optional fields directly.
-        For batch: provide a list of component dicts in the 'items' parameter.
-
-        Args:
-            ctx: MCP context for logging and error handling
-            name: Name of the component (required for single item mode)
-            type: Type of the component (required for single item mode)
-            service_provider: Provider of the service (e.g., 'AWS', 'Azure', 'GCP')
-            specific_service: Specific service name (e.g., 'EC2', 'S3', 'Lambda')
-            version: Version of the component
-            description: Description of the component
-            configuration: Configuration details of the component
-            items: Optional list of component dicts for batch operation
-
-        Returns:
-            A confirmation message with the component ID(s)
-        """
-        return await batch_add(
-            ctx, items,
-            {"name": name, "type": type, "service_provider": service_provider,
-             "specific_service": specific_service, "version": version,
-             "description": description, "configuration": configuration},
-            add_component_impl, "component"
-        )
-
-    @mcp.tool()
-    async def update_component(
-        ctx: Context,
-        id: str = Field(default=None, description="ID of the component to update (required for single item mode)"),
-        name: Optional[str] = Field(default=None, description="New name of the component"),
-        type: Optional[str] = Field(default=None, description="New type of the component"),
-        service_provider: Optional[str] = Field(default=None, description="New provider of the service"),
-        specific_service: Optional[str] = Field(default=None, description="New specific service name"),
-        version: Optional[str] = Field(default=None, description="New version of the component"),
-        description: Optional[str] = Field(default=None, description="New description of the component"),
-        configuration: Optional[Dict[str, Any]] = Field(default=None, description="New configuration details of the component"),
-        items: Optional[List[Dict[str, Any]]] = Field(default=None, description="Optional list of components to update in batch. Each dict must contain 'id' and any fields to update. When provided, individual parameters are ignored."),
-    ) -> str:
-        """Update an existing component in the architecture. Supports batch operations via the 'items' parameter.
-
-        This tool updates one or more existing components in the system architecture.
-        For single item: provide id and fields to update directly.
-        For batch: provide a list of component dicts in the 'items' parameter (each must include 'id').
-
-        Args:
-            ctx: MCP context for logging and error handling
-            id: ID of the component to update (required for single item mode)
-            name: New name of the component
-            type: New type of the component
-            service_provider: New provider of the service
-            specific_service: New specific service name
-            version: New version of the component
-            description: New description of the component
-            configuration: New configuration details of the component
-            items: Optional list of component dicts for batch update
-
-        Returns:
-            A confirmation message
-        """
-        return await batch_update(
-            ctx, items,
-            {"id": id, "name": name, "type": type, "service_provider": service_provider,
-             "specific_service": specific_service, "version": version,
-             "description": description, "configuration": configuration},
-            update_component_impl, "component"
-        )
-
-    @mcp.tool()
-    async def list_components(
-        ctx: Context,
-        type: Optional[str] = Field(default=None, description="Optional type to filter components"),
-    ) -> str:
-        """List all components in the architecture.
-
-        This tool lists all components in the system architecture.
-
-        Args:
-            ctx: MCP context for logging and error handling
-            type: Optional type to filter components
-
-        Returns:
-            A markdown-formatted list of components
-        """
-        return await list_components_impl(ctx, type)
-
-    @mcp.tool()
-    async def delete_component(
-        ctx: Context,
-        id: Optional[str] = Field(default=None, description="ID of the component to delete (required for single item mode)"),
-        ids: Optional[List[str]] = Field(default=None, description="Optional list of component IDs to delete in batch. When provided, the 'id' parameter is ignored."),
-    ) -> str:
-        """Delete a component from the architecture. Supports batch operations via the 'ids' parameter.
-
-        This tool deletes one or more components from the system architecture.
-        For single item: provide the id directly.
-        For batch: provide a list of IDs in the 'ids' parameter.
-
-        Args:
-            ctx: MCP context for logging and error handling
-            id: ID of the component to delete (required for single item mode)
-            ids: Optional list of component IDs for batch deletion
-
-        Returns:
-            A confirmation message
-        """
-        return await batch_delete(ctx, ids, id, delete_component_impl, "component")
-    
-    @mcp.tool()
-    async def add_connection(
-        ctx: Context,
-        source_id: str = Field(default=None, description="ID of the source component (required for single item mode)"),
-        destination_id: str = Field(default=None, description="ID of the destination component (required for single item mode)"),
-        protocol: Optional[str] = Field(default=None, description="Protocol used for the connection (e.g., 'HTTP', 'HTTPS', 'TCP')"),
-        port: Optional[int] = Field(default=None, description="Port used for the connection"),
-        encryption: bool = Field(default=False, description="Whether the connection is encrypted"),
-        description: Optional[str] = Field(default=None, description="Description of the connection"),
-        items: Optional[List[Dict[str, Any]]] = Field(default=None, description="Optional list of connections to add in batch. Each dict should contain 'source_id', 'destination_id', and optionally 'protocol', 'port', 'encryption', 'description'. When provided, individual parameters are ignored."),
-    ) -> str:
-        """Add a new connection to the architecture. Supports batch operations via the 'items' parameter.
-
-        This tool adds one or more connections between components in the system architecture.
-        For single item: provide source_id, destination_id, and optional fields directly.
-        For batch: provide a list of connection dicts in the 'items' parameter.
-
-        Args:
-            ctx: MCP context for logging and error handling
-            source_id: ID of the source component (required for single item mode)
-            destination_id: ID of the destination component (required for single item mode)
-            protocol: Protocol used for the connection (e.g., 'HTTP', 'HTTPS', 'TCP')
-            port: Port used for the connection
-            encryption: Whether the connection is encrypted
-            description: Description of the connection
-            items: Optional list of connection dicts for batch operation
-
-        Returns:
-            A confirmation message with the connection ID(s)
-        """
-        return await batch_add(
-            ctx, items,
-            {"source_id": source_id, "destination_id": destination_id,
-             "protocol": protocol, "port": port, "encryption": encryption,
-             "description": description},
-            add_connection_impl, "connection"
-        )
-
-    @mcp.tool()
-    async def update_connection(
-        ctx: Context,
-        id: str = Field(default=None, description="ID of the connection to update (required for single item mode)"),
-        source_id: Optional[str] = Field(default=None, description="New ID of the source component"),
-        destination_id: Optional[str] = Field(default=None, description="New ID of the destination component"),
-        protocol: Optional[str] = Field(default=None, description="New protocol used for the connection"),
-        port: Optional[int] = Field(default=None, description="New port used for the connection"),
-        encryption: Optional[bool] = Field(default=None, description="New encryption status"),
-        description: Optional[str] = Field(default=None, description="New description of the connection"),
-        items: Optional[List[Dict[str, Any]]] = Field(default=None, description="Optional list of connections to update in batch. Each dict must contain 'id' and any fields to update. When provided, individual parameters are ignored."),
-    ) -> str:
-        """Update an existing connection in the architecture. Supports batch operations via the 'items' parameter.
-
-        This tool updates one or more existing connections in the system architecture.
-        For single item: provide id and fields to update directly.
-        For batch: provide a list of connection dicts in the 'items' parameter (each must include 'id').
-
-        Args:
-            ctx: MCP context for logging and error handling
-            id: ID of the connection to update (required for single item mode)
-            source_id: New ID of the source component
-            destination_id: New ID of the destination component
-            protocol: New protocol used for the connection
-            port: New port used for the connection
-            encryption: New encryption status
-            description: New description of the connection
-            items: Optional list of connection dicts for batch update
-
-        Returns:
-            A confirmation message
-        """
-        return await batch_update(
-            ctx, items,
-            {"id": id, "source_id": source_id, "destination_id": destination_id,
-             "protocol": protocol, "port": port, "encryption": encryption,
-             "description": description},
-            update_connection_impl, "connection"
-        )
-
-    @mcp.tool()
-    async def list_connections(
-        ctx: Context,
-        component_id: Optional[str] = Field(default=None, description="Optional component ID to filter connections"),
-    ) -> str:
-        """List all connections in the architecture.
-
-        This tool lists all connections in the system architecture.
-
-        Args:
-            ctx: MCP context for logging and error handling
-            component_id: Optional component ID to filter connections
-
-        Returns:
-            A markdown-formatted list of connections
-        """
-        return await list_connections_impl(ctx, component_id)
-
-    @mcp.tool()
-    async def delete_connection(
-        ctx: Context,
-        id: Optional[str] = Field(default=None, description="ID of the connection to delete (required for single item mode)"),
-        ids: Optional[List[str]] = Field(default=None, description="Optional list of connection IDs to delete in batch. When provided, the 'id' parameter is ignored."),
-    ) -> str:
-        """Delete a connection from the architecture. Supports batch operations via the 'ids' parameter.
-
-        This tool deletes one or more connections from the system architecture.
-        For single item: provide the id directly.
-        For batch: provide a list of IDs in the 'ids' parameter.
-
-        Args:
-            ctx: MCP context for logging and error handling
-            id: ID of the connection to delete (required for single item mode)
-            ids: Optional list of connection IDs for batch deletion
-
-        Returns:
-            A confirmation message
-        """
-        return await batch_delete(ctx, ids, id, delete_connection_impl, "connection")
-
-    @mcp.tool()
-    async def add_data_store(
-        ctx: Context,
-        name: str = Field(default=None, description="Name of the data store (required for single item mode)"),
-        type: str = Field(default=None, description="Type of the data store (e.g., 'Relational', 'NoSQL', 'Object Storage') (required for single item mode)"),
-        classification: str = Field(default=None, description="Classification of the data (e.g., 'Public', 'Internal', 'Confidential') (required for single item mode)"),
-        encryption_at_rest: bool = Field(default=False, description="Whether the data is encrypted at rest"),
-        backup_frequency: Optional[str] = Field(default=None, description="Frequency of backups (e.g., 'Hourly', 'Daily', 'Weekly')"),
-        description: Optional[str] = Field(default=None, description="Description of the data store"),
-        items: Optional[List[Dict[str, Any]]] = Field(default=None, description="Optional list of data stores to add in batch. Each dict should contain 'name', 'type', 'classification', and optionally 'encryption_at_rest', 'backup_frequency', 'description'. When provided, individual parameters are ignored."),
-    ) -> str:
-        """Add a new data store to the architecture. Supports batch operations via the 'items' parameter.
-
-        This tool adds one or more data stores to the system architecture.
-        For single item: provide name, type, classification, and optional fields directly.
-        For batch: provide a list of data store dicts in the 'items' parameter.
-
-        Args:
-            ctx: MCP context for logging and error handling
-            name: Name of the data store (required for single item mode)
-            type: Type of the data store (required for single item mode)
-            classification: Classification of the data (required for single item mode)
-            encryption_at_rest: Whether the data is encrypted at rest
-            backup_frequency: Frequency of backups (e.g., 'Hourly', 'Daily', 'Weekly')
-            description: Description of the data store
-            items: Optional list of data store dicts for batch operation
-
-        Returns:
-            A confirmation message with the data store ID(s)
-        """
-        return await batch_add(
-            ctx, items,
-            {"name": name, "type": type, "classification": classification,
-             "encryption_at_rest": encryption_at_rest, "backup_frequency": backup_frequency,
-             "description": description},
-            add_data_store_impl, "data store"
-        )
-
-    @mcp.tool()
-    async def update_data_store(
-        ctx: Context,
-        id: str = Field(default=None, description="ID of the data store to update (required for single item mode)"),
-        name: Optional[str] = Field(default=None, description="New name of the data store"),
-        type: Optional[str] = Field(default=None, description="New type of the data store"),
-        classification: Optional[str] = Field(default=None, description="New classification of the data"),
-        encryption_at_rest: Optional[bool] = Field(default=None, description="New encryption status"),
-        backup_frequency: Optional[str] = Field(default=None, description="New frequency of backups"),
-        description: Optional[str] = Field(default=None, description="New description of the data store"),
-        items: Optional[List[Dict[str, Any]]] = Field(default=None, description="Optional list of data stores to update in batch. Each dict must contain 'id' and any fields to update. When provided, individual parameters are ignored."),
-    ) -> str:
-        """Update an existing data store in the architecture. Supports batch operations via the 'items' parameter.
-
-        This tool updates one or more existing data stores in the system architecture.
-        For single item: provide id and fields to update directly.
-        For batch: provide a list of data store dicts in the 'items' parameter (each must include 'id').
-
-        Args:
-            ctx: MCP context for logging and error handling
-            id: ID of the data store to update (required for single item mode)
-            name: New name of the data store
-            type: New type of the data store
-            classification: New classification of the data
-            encryption_at_rest: New encryption status
-            backup_frequency: New frequency of backups
-            description: New description of the data store
-            items: Optional list of data store dicts for batch update
-
-        Returns:
-            A confirmation message
-        """
-        return await batch_update(
-            ctx, items,
-            {"id": id, "name": name, "type": type, "classification": classification,
-             "encryption_at_rest": encryption_at_rest, "backup_frequency": backup_frequency,
-             "description": description},
-            update_data_store_impl, "data store"
-        )
-
-    @mcp.tool()
-    async def list_data_stores(
-        ctx: Context,
-        type: Optional[str] = Field(default=None, description="Optional type to filter data stores"),
-    ) -> str:
-        """List all data stores in the architecture.
-
-        This tool lists all data stores in the system architecture.
-
-        Args:
-            ctx: MCP context for logging and error handling
-            type: Optional type to filter data stores
-
-        Returns:
-            A markdown-formatted list of data stores
-        """
-        return await list_data_stores_impl(ctx, type)
-
-    @mcp.tool()
-    async def delete_data_store(
-        ctx: Context,
-        id: Optional[str] = Field(default=None, description="ID of the data store to delete (required for single item mode)"),
-        ids: Optional[List[str]] = Field(default=None, description="Optional list of data store IDs to delete in batch. When provided, the 'id' parameter is ignored."),
-    ) -> str:
-        """Delete a data store from the architecture. Supports batch operations via the 'ids' parameter.
-
-        This tool deletes one or more data stores from the system architecture.
-        For single item: provide the id directly.
-        For batch: provide a list of IDs in the 'ids' parameter.
-
-        Args:
-            ctx: MCP context for logging and error handling
-            id: ID of the data store to delete (required for single item mode)
-            ids: Optional list of data store IDs for batch deletion
-
-        Returns:
-            A confirmation message
-        """
-        return await batch_delete(ctx, ids, id, delete_data_store_impl, "data store")
-
-    @mcp.tool()
-    async def get_architecture_analysis_plan(
-        ctx: Context,
-    ) -> str:
-        """Get a comprehensive architecture analysis plan.
-
-        This tool returns a detailed plan for analyzing system architecture for security concerns
-        using AI-powered analysis with AWS documentation validation.
-
-        Args:
-            ctx: MCP context for logging and error handling
-
-        Returns:
-            A markdown-formatted architecture analysis plan with prompts for LLM analysis
-        """
-        return await get_architecture_analysis_plan_impl(ctx)
-
-    @mcp.tool()
-    async def clear_architecture(
-        ctx: Context,
-    ) -> str:
-        """Clear the architecture.
-
-        This tool clears all components, connections, and data stores from the architecture.
-
-        Args:
-            ctx: MCP context for logging and error handling
-
-        Returns:
-            A confirmation message
-        """
-        return await clear_architecture_impl(ctx)

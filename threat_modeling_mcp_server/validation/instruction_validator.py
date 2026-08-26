@@ -147,21 +147,14 @@ def generate_tool_documentation(modules: List) -> str:
     
     # Generate markdown documentation
     doc_lines = []
-    current_category = ""
     
     # Group tools by category (based on module name patterns)
     categories = {
-        'threat_model_plan': 'Threat Modeling Plan',
-        'assumption_manager': 'Assumption Management',
-        'business_context': 'Business Context Analysis',
+        'step_orchestrator': 'Workflow',
         'system_context': 'System Context',
-        'architecture_analyzer': 'Architecture Analysis',
-        'threat_actor_analyzer': 'Threat Actor Analysis',
-        'trust_boundary_analyzer': 'Trust Boundary Analysis',
-        'trust_boundary_detector': 'Trust Boundary Detection',
-        'asset_flow_analyzer': 'Asset Flow Analysis',
-        'threat_generator': 'Threat Generator',
+        'domain_managers': 'Domain Managers',
         'data_model_types': 'Data Model Types',
+        'code_security_validator': 'Code Validation',
     }
     
     for module in modules:

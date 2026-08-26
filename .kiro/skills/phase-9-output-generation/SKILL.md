@@ -10,24 +10,21 @@ Generate final deliverables: Threat Composer-compatible JSON export and human-re
 
 ## Tools Reference
 
-### execute_final_export_step()
-**Recommended**: Automated export that generates everything with a timestamped filename.
-- Calls `export_comprehensive_threat_model()` internally
-- Includes state summary in the response
-- Saves both JSON and Markdown to `.threatmodel/`
-
-### export_comprehensive_threat_model(output_path)
-Manual export with custom filename.
-- `output_path`: Base filename (extensions added automatically)
+### export_threat_model
+Exports the current model and includes a state summary in the response.
+- Omit `output_path` to use a timestamped filename
+- Pass `output_path="my_model.json"` to choose a base path and filename
 - Generates BOTH `.tc.json` and `.md` files
+- Saves both files to the adjacent `.threatmodel/` directory
 - JSON is Threat Composer compatible (schema version 1)
 
-The comprehensive export includes current threat and mitigation statuses plus
-structured Phase 7.5 findings and evidence under `codeValidation`.
+The comprehensive export includes current threat and mitigation statuses.
+Extended JSON and Markdown also include residual-risk assessments; the standard
+Threat Composer fields remain unchanged.
 
 ### Progress Tools
-- `get_threat_model_progress()` -- Final progress summary with phase completion
-- `list_assumptions()` -- All documented assumptions
+- `manage_workflow(action="progress")` -- Final progress summary with phase completion
+- `manage_assumptions(action="list")` -- All documented assumptions
 
 ## Output Files
 
@@ -95,9 +92,9 @@ Contains:
 
 ## Workflow
 
-1. **Call `get_phase_9_guidance()`**
-2. **Call `execute_final_export_step()`** (or `export_comprehensive_threat_model()` with custom name)
-3. **Call `get_threat_model_progress()`** for final summary
+1. **Call `manage_workflow(action="guidance", phase="9")`**
+2. **Call `export_threat_model()`**, optionally with `output_path="my_model.json"`
+3. **Call `manage_workflow(action="progress")`** for final summary
 4. **Present to user**:
    - File locations in `.threatmodel/`
    - Summary: N threats, N mitigations, N assumptions
@@ -108,5 +105,6 @@ Contains:
 - [ ] JSON export generated (Threat Composer compatible)
 - [ ] Markdown report generated
 - [ ] Files saved to `.threatmodel/` directory
+- [ ] `manage_workflow(action="status")` reports Phase 9 complete for the current model
 - [ ] Progress summary generated
 - [ ] User informed of file locations and key findings

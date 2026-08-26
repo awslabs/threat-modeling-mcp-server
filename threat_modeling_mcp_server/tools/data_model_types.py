@@ -1,12 +1,11 @@
 """Data model types functionality for the Threat Modeling MCP Server."""
 
 import inspect
-import sys
 from enum import Enum
 from loguru import logger
 from mcp.server.fastmcp import Context
 from pydantic import Field
-from typing import List, Dict, Any, Type
+from typing import Dict, Optional, Type
 
 # Import all modules that contain Enum classes
 import threat_modeling_mcp_server.models.architecture_models as architecture_models
@@ -56,55 +55,41 @@ def discover_enum_classes() -> Dict[str, Type[Enum]]:
 DATA_MODELS = discover_enum_classes()
 
 
-async def get_data_model_types_impl(
+async def inspect_data_models_impl(
     ctx: Context,
-    model_name: str,
+    model_name: Optional[str] = None,
 ) -> str:
-    """Get available types for a data model.
-    
+    """List available enum models or inspect one model's accepted values.
+
     Args:
         ctx: MCP context for logging and error handling
-        model_name: Name of the data model to get types for
-        
+        model_name: Optional enum model name to inspect
+
     Returns:
-        A markdown-formatted list of available types
+        A markdown-formatted model list or accepted-value list
     """
+    if model_name is None:
+        logger.debug('Listing all data models')
+        result = "# Available Data Models\n\n"
+        for available_model in sorted(DATA_MODELS):
+            result += f"- {available_model}\n"
+        return result
+
     logger.debug(f'Getting types for data model: {model_name}')
-    
+
     if model_name not in DATA_MODELS:
         available_models = ", ".join(sorted(DATA_MODELS.keys()))
         return f"Data model '{model_name}' not found. Available models: {available_models}"
-    
+
     model_enum = DATA_MODELS[model_name]
-    
+
     result = f"# Available Types for {model_name}\n\n"
     result += "**Important**: Use the VALUE (not the name) when calling tools.\n\n"
-    
+
     for enum_value in model_enum:
         result += f"- **Use**: `\"{enum_value.value}\"` (Name: {enum_value.name})\n"
-    
+
     result += "\n**Example**: For authorization_method, use `\"Policy-based\"` not `\"POLICY_BASED\"`\n"
-    
-    return result
-
-
-async def list_data_models_impl(
-    ctx: Context,
-) -> str:
-    """List all available data models.
-    
-    Args:
-        ctx: MCP context for logging and error handling
-        
-    Returns:
-        A markdown-formatted list of available data models
-    """
-    logger.debug('Listing all data models')
-    
-    result = "# Available Data Models\n\n"
-
-    for model_name in sorted(DATA_MODELS):
-        result += f"- {model_name}\n"
 
     return result
 
@@ -117,35 +102,12 @@ def register_tools(mcp):
         mcp: The MCP server instance
     """
     @mcp.tool()
-    async def get_data_model_types(
+    async def inspect_data_models(
         ctx: Context,
-        model_name: str = Field(description="Name of the data model to get types for"),
+        model_name: Optional[str] = Field(
+            default=None,
+            description="Enum model to inspect; omit to list all available models",
+        ),
     ) -> str:
-        """Get available types for a data model.
-
-        This tool returns the available types for a specified data model.
-
-        Args:
-            ctx: MCP context for logging and error handling
-            model_name: Name of the data model to get types for
-
-        Returns:
-            A markdown-formatted list of available types
-        """
-        return await get_data_model_types_impl(ctx, model_name)
-
-    @mcp.tool()
-    async def list_data_models(
-        ctx: Context,
-    ) -> str:
-        """List all available data models.
-
-        This tool lists all available data models that can be used with get_data_model_types.
-
-        Args:
-            ctx: MCP context for logging and error handling
-
-        Returns:
-            A markdown-formatted list of available data models
-        """
-        return await list_data_models_impl(ctx)
+        """List enum models or inspect the accepted values for one model."""
+        return await inspect_data_models_impl(ctx, model_name)

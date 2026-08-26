@@ -1,16 +1,14 @@
 """Trust Boundary Analysis functionality for the Threat Modeling MCP Server."""
 
-from typing import Dict, List, Optional, Any, Set
+from typing import Dict, List, Optional
 from loguru import logger
 from mcp.server.fastmcp import Context
-from pydantic import Field
 
 from threat_modeling_mcp_server.models.trust_boundary_models import (
     TrustZone, CrossingPoint, TrustBoundary,
     BoundaryType, AuthenticationMethod, AuthorizationMethod, TrustLevel
 )
-from threat_modeling_mcp_server.models.architecture_models import Component, Connection
-from threat_modeling_mcp_server.utils.batch_utils import batch_add, batch_update, batch_delete
+from threat_modeling_mcp_server.tools import architecture_analyzer as architecture
 from threat_modeling_mcp_server.utils.id_utils import next_id
 
 
@@ -49,7 +47,7 @@ async def add_trust_zone_impl(
         id=trust_zone_id,
         name=name,
         trust_level=TrustLevel(trust_level),
-        contained_components=[],
+        contained_nodes=[],
         description=description,
     )
 
@@ -125,7 +123,7 @@ async def list_trust_zones_impl(
         filtered_zones = [z for z in filtered_zones if z.trust_level == TrustLevel(trust_level)]
 
     if not filtered_zones:
-        return f"No trust zones found with the specified criteria."
+        return "No trust zones found with the specified criteria."
 
     # Sort by trust level
     sorted_zones = sorted(filtered_zones, key=lambda z: z.trust_level.value)
@@ -139,13 +137,16 @@ async def list_trust_zones_impl(
         if zone.description:
             result += f"**Description:** {zone.description}\n\n"
 
-        if zone.contained_components:
-            result += "**Contained Components:**\n\n"
-            for component_id in zone.contained_components:
-                result += f"- {component_id}\n"
+        if zone.contained_nodes:
+            result += "**Contained Architecture Nodes:**\n\n"
+            for node_id in zone.contained_nodes:
+                result += (
+                    f"- {architecture.get_architecture_node_name(node_id)} "
+                    f"({node_id})\n"
+                )
             result += "\n"
         else:
-            result += "**Contained Components:** None\n\n"
+            result += "**Contained Architecture Nodes:** None\n\n"
 
         result += "---\n\n"
 
@@ -178,13 +179,16 @@ async def get_trust_zone_impl(
     if zone.description:
         result += f"**Description:** {zone.description}\n\n"
 
-    if zone.contained_components:
-        result += "**Contained Components:**\n\n"
-        for component_id in zone.contained_components:
-            result += f"- {component_id}\n"
+    if zone.contained_nodes:
+        result += "**Contained Architecture Nodes:**\n\n"
+        for node_id in zone.contained_nodes:
+            result += (
+                f"- {architecture.get_architecture_node_name(node_id)} "
+                f"({node_id})\n"
+            )
         result += "\n"
     else:
-        result += "**Contained Components:** None\n\n"
+        result += "**Contained Architecture Nodes:** None\n\n"
 
     # Find crossing points that involve this zone
     related_crossing_points = [
@@ -238,65 +242,68 @@ async def delete_trust_zone_impl(
     return f"Trust zone {id} deleted successfully."
 
 
-async def add_component_to_zone_impl(
+async def add_node_to_zone_impl(
     ctx: Context,
     zone_id: str,
-    component_id: str,
+    node_id: str,
 ) -> str:
-    """Add a component to a trust zone.
+    """Add an architecture node to a trust zone.
 
     Args:
         ctx: MCP context for logging and error handling
         zone_id: ID of the trust zone
-        component_id: ID of the component to add
+        node_id: ID of the component or data store to add
 
     Returns:
         A confirmation message
     """
-    logger.debug(f'Adding component {component_id} to trust zone {zone_id}')
+    logger.debug(f'Adding architecture node {node_id} to trust zone {zone_id}')
 
     if zone_id not in trust_zones:
         return f"Trust zone with ID {zone_id} not found."
 
-    # Check if the component is already in another zone
+    if architecture.get_architecture_node(node_id) is None:
+        return f"Architecture node with ID {node_id} not found."
+
     for z_id, zone in trust_zones.items():
-        if component_id in zone.contained_components and z_id != zone_id:
-            return f"Component {component_id} is already in trust zone {z_id}. Remove it first."
+        if node_id in zone.contained_nodes and z_id != zone_id:
+            return (
+                f"Architecture node {node_id} is already in trust zone {z_id}. "
+                "Remove it first."
+            )
 
-    # Add the component to the zone
-    if component_id not in trust_zones[zone_id].contained_components:
-        trust_zones[zone_id].contained_components.append(component_id)
+    if node_id not in trust_zones[zone_id].contained_nodes:
+        trust_zones[zone_id].contained_nodes.append(node_id)
 
-    return f"Component {component_id} added to trust zone {zone_id}."
+    return f"Architecture node {node_id} added to trust zone {zone_id}."
 
 
-async def remove_component_from_zone_impl(
+async def remove_node_from_zone_impl(
     ctx: Context,
     zone_id: str,
-    component_id: str,
+    node_id: str,
 ) -> str:
-    """Remove a component from a trust zone.
+    """Remove an architecture node from a trust zone.
 
     Args:
         ctx: MCP context for logging and error handling
         zone_id: ID of the trust zone
-        component_id: ID of the component to remove
+        node_id: ID of the component or data store to remove
 
     Returns:
         A confirmation message
     """
-    logger.debug(f'Removing component {component_id} from trust zone {zone_id}')
+    logger.debug(f'Removing architecture node {node_id} from trust zone {zone_id}')
 
     if zone_id not in trust_zones:
         return f"Trust zone with ID {zone_id} not found."
 
-    if component_id not in trust_zones[zone_id].contained_components:
-        return f"Component {component_id} is not in trust zone {zone_id}."
+    if node_id not in trust_zones[zone_id].contained_nodes:
+        return f"Architecture node {node_id} is not in trust zone {zone_id}."
 
-    # Remove the component from the zone
-    trust_zones[zone_id].contained_components.remove(component_id)
+    trust_zones[zone_id].contained_nodes.remove(node_id)
 
-    return f"Component {component_id} removed from trust zone {zone_id}."
+    return f"Architecture node {node_id} removed from trust zone {zone_id}."
 
 
 # Crossing Point Management Functions
@@ -434,7 +441,7 @@ async def list_crossing_points_impl(
         ]
 
     if not filtered_points:
-        return f"No crossing points found with the specified criteria."
+        return "No crossing points found with the specified criteria."
 
     result = "# Crossing Points\n\n"
 
@@ -594,7 +601,9 @@ async def add_connection_to_crossing_point_impl(
     if crossing_point_id not in crossing_points:
         return f"Crossing point with ID {crossing_point_id} not found."
 
-    # Add the connection to the crossing point
+    if connection_id not in architecture.connections:
+        return f"Connection with ID {connection_id} not found."
+
     if connection_id not in crossing_points[crossing_point_id].connection_ids:
         crossing_points[crossing_point_id].connection_ids.append(connection_id)
 
@@ -759,7 +768,7 @@ async def list_trust_boundaries_impl(
         filtered_boundaries = [b for b in filtered_boundaries if b.type == BoundaryType(type)]
 
     if not filtered_boundaries:
-        return f"No trust boundaries found with the specified criteria."
+        return "No trust boundaries found with the specified criteria."
 
     result = "# Trust Boundaries\n\n"
 
@@ -908,7 +917,7 @@ async def get_trust_boundary_analysis_plan_impl(
     result = "# Trust Boundary Analysis Plan with AWS Documentation Validation\n\n"
 
     if aws_components:
-        result += f"## AWS Components Detected in Architecture\n\n"
+        result += "## AWS Components Detected in Architecture\n\n"
         result += f"Found {len(aws_components)} AWS components that may affect trust boundaries:\n\n"
         for component in aws_components:
             result += f"- **{component.name}** ({component.id}): {component.specific_service or 'AWS Service'}\n"
@@ -922,36 +931,36 @@ async def get_trust_boundary_analysis_plan_impl(
         result += "The following AWS documentation searches are MANDATORY for trust boundary analysis:\n\n"
 
         # Add general AWS network security searches
-        result += f"### AWS Network Security Documentation\n\n"
-        result += f"**REQUIRED**: Search AWS documentation for VPC and network security:\n"
-        result += f"```\n"
-        result += f"use_mcp_tool(\n"
-        result += f'  server_name: "github.com/awslabs/mcp/tree/main/src/aws-documentation-mcp-server",\n'
-        result += f'  tool_name: "search_documentation",\n'
-        result += f'  arguments: {{"search_phrase": "VPC security groups network ACL"}}\n'
-        result += f")\n"
-        result += f"```\n\n"
+        result += "### AWS Network Security Documentation\n\n"
+        result += "**REQUIRED**: Search AWS documentation for VPC and network security:\n"
+        result += "```\n"
+        result += "use_mcp_tool(\n"
+        result += '  server_name: "github.com/awslabs/mcp/tree/main/src/aws-documentation-mcp-server",\n'
+        result += '  tool_name: "search_documentation",\n'
+        result += '  arguments: {"search_phrase": "VPC security groups network ACL"}\n'
+        result += ")\n"
+        result += "```\n\n"
 
-        result += f"### AWS IAM and Access Control Documentation\n\n"
-        result += f"**REQUIRED**: Search AWS documentation for IAM policies and access control:\n"
-        result += f"```\n"
-        result += f"use_mcp_tool(\n"
-        result += f'  server_name: "github.com/awslabs/mcp/tree/main/src/aws-documentation-mcp-server",\n'
-        result += f'  tool_name: "search_documentation",\n'
-        result += f'  arguments: {{"search_phrase": "IAM policies cross-account access"}}\n'
-        result += f")\n"
-        result += f"```\n\n"
+        result += "### AWS IAM and Access Control Documentation\n\n"
+        result += "**REQUIRED**: Search AWS documentation for IAM policies and access control:\n"
+        result += "```\n"
+        result += "use_mcp_tool(\n"
+        result += '  server_name: "github.com/awslabs/mcp/tree/main/src/aws-documentation-mcp-server",\n'
+        result += '  tool_name: "search_documentation",\n'
+        result += '  arguments: {"search_phrase": "IAM policies cross-account access"}\n'
+        result += ")\n"
+        result += "```\n\n"
 
         for service in aws_services:
             result += f"### {service} Security Documentation\n\n"
             result += f"**REQUIRED**: Search AWS documentation for {service} security best practices:\n"
-            result += f"```\n"
-            result += f"use_mcp_tool(\n"
-            result += f'  server_name: "github.com/awslabs/mcp/tree/main/src/aws-documentation-mcp-server",\n'
-            result += f'  tool_name: "search_documentation",\n'
+            result += "```\n"
+            result += "use_mcp_tool(\n"
+            result += '  server_name: "github.com/awslabs/mcp/tree/main/src/aws-documentation-mcp-server",\n'
+            result += '  tool_name: "search_documentation",\n'
             result += f'  arguments: {{"search_phrase": "{service} security best practices"}}\n'
-            result += f")\n"
-            result += f"```\n\n"
+            result += ")\n"
+            result += "```\n\n"
 
         result += "**ENFORCEMENT**: Trust boundary analysis cannot be completed without validating AWS network security configurations against official AWS documentation.\n\n"
 
@@ -960,10 +969,10 @@ async def get_trust_boundary_analysis_plan_impl(
 ### Step 1: Gather Trust Boundary Data
 First, collect all trust boundary information using the following tools:
 
-1. **Get Trust Zones**: Use `list_trust_zones()` to retrieve all trust zones
-2. **Get Crossing Points**: Use `list_crossing_points()` to retrieve all crossing points
-3. **Get Trust Boundaries**: Use `list_trust_boundaries()` to retrieve all trust boundaries
-4. **Get Detailed Information**: Use `get_trust_zone(id)`, `get_crossing_point(id)`, and `get_trust_boundary(id)` for specific details
+1. **Get Trust Zones**: Use `manage_trust_boundaries(action="list", section="zones")`
+2. **Get Crossing Points**: Use `manage_trust_boundaries(action="list", section="crossing_points")`
+3. **Get Trust Boundaries**: Use `manage_trust_boundaries(action="list", section="boundaries")`
+4. **Get Detailed Information**: Use `manage_trust_boundaries(action="get", section=SECTION, item_id=ID)`
 
 ### Step 2: AWS Documentation Validation (MANDATORY if AWS components present)
 """
@@ -997,7 +1006,7 @@ Use the following prompt structure with an LLM to analyze the trust boundaries:
 You are a cybersecurity expert analyzing trust boundaries for security concerns and access control risks.
 
 TRUST BOUNDARY DATA:
-[Insert the output from list_trust_zones(), list_crossing_points(), and list_trust_boundaries() here]
+[Insert the output from manage_trust_boundaries list calls here]
 """
 
     if aws_components:
@@ -1179,7 +1188,7 @@ Provide your analysis in the following markdown format:
     result += """
 ## Tools and Resources
 
-- **Trust Boundary Tools**: list_trust_zones, list_crossing_points, list_trust_boundaries
+- **Trust Boundary Tool**: manage_trust_boundaries
 """
 
     if aws_components:
@@ -1215,525 +1224,3 @@ async def clear_trust_boundaries_impl(
     trust_boundaries.clear()
 
     return "All trust boundaries, crossing points, and trust zones cleared."
-
-
-# Register tools with the MCP server
-def register_tools(mcp):
-    """Register trust boundary analysis tools with the MCP server.
-
-    Args:
-        mcp: The MCP server instance
-    """
-    # Trust Zone Management
-    @mcp.tool()
-    async def add_trust_zone(
-        ctx: Context,
-        name: str = Field(default=None, description="Name of the trust zone (required for single item mode)"),
-        trust_level: str = Field(default=None, description="Trust level of the zone (required for single item mode)"),
-        description: Optional[str] = Field(default=None, description="Description of the trust zone"),
-        items: Optional[List[Dict[str, Any]]] = Field(default=None, description="Optional list of trust zones to add in batch. Each dict should contain 'name', 'trust_level', and optionally 'description'. When provided, individual parameters are ignored."),
-    ) -> str:
-        """Add a new trust zone. Supports batch operations via the 'items' parameter.
-
-        This tool adds one or more trust zones to the system architecture.
-        For single item: provide name, trust_level, and optional fields directly.
-        For batch: provide a list of trust zone dicts in the 'items' parameter.
-
-        Args:
-            ctx: MCP context for logging and error handling
-            name: Name of the trust zone (required for single item mode)
-            trust_level: Trust level of the zone (required for single item mode)
-            description: Description of the trust zone
-            items: Optional list of trust zone dicts for batch operation
-
-        Returns:
-            A confirmation message with the trust zone ID(s)
-        """
-        return await batch_add(
-            ctx, items,
-            {"name": name, "trust_level": trust_level, "description": description},
-            add_trust_zone_impl, "trust zone"
-        )
-
-    @mcp.tool()
-    async def update_trust_zone(
-        ctx: Context,
-        id: str = Field(default=None, description="ID of the trust zone to update (required for single item mode)"),
-        name: Optional[str] = Field(default=None, description="New name of the trust zone"),
-        trust_level: Optional[str] = Field(default=None, description="New trust level of the zone"),
-        description: Optional[str] = Field(default=None, description="New description of the trust zone"),
-        items: Optional[List[Dict[str, Any]]] = Field(default=None, description="Optional list of trust zones to update in batch. Each dict must contain 'id' and any fields to update. When provided, individual parameters are ignored."),
-    ) -> str:
-        """Update an existing trust zone. Supports batch operations via the 'items' parameter.
-
-        This tool updates one or more existing trust zones in the system architecture.
-        For single item: provide id and fields to update directly.
-        For batch: provide a list of trust zone dicts in the 'items' parameter (each must include 'id').
-
-        Args:
-            ctx: MCP context for logging and error handling
-            id: ID of the trust zone to update (required for single item mode)
-            name: New name of the trust zone
-            trust_level: New trust level of the zone
-            description: New description of the trust zone
-            items: Optional list of trust zone dicts for batch update
-
-        Returns:
-            A confirmation message
-        """
-        return await batch_update(
-            ctx, items,
-            {"id": id, "name": name, "trust_level": trust_level, "description": description},
-            update_trust_zone_impl, "trust zone"
-        )
-
-    @mcp.tool()
-    async def list_trust_zones(
-        ctx: Context,
-        trust_level: Optional[str] = Field(default=None, description="Optional trust level to filter zones"),
-    ) -> str:
-        """List all trust zones.
-
-        This tool lists all trust zones in the system architecture.
-
-        Args:
-            ctx: MCP context for logging and error handling
-            trust_level: Optional trust level to filter zones
-
-        Returns:
-            A markdown-formatted list of trust zones
-        """
-        return await list_trust_zones_impl(ctx, trust_level)
-
-    @mcp.tool()
-    async def get_trust_zone(
-        ctx: Context,
-        id: str = Field(description="ID of the trust zone to retrieve"),
-    ) -> str:
-        """Get details about a specific trust zone.
-
-        This tool retrieves details about a specific trust zone in the system architecture.
-
-        Args:
-            ctx: MCP context for logging and error handling
-            id: ID of the trust zone to retrieve
-
-        Returns:
-            A markdown-formatted description of the trust zone
-        """
-        return await get_trust_zone_impl(ctx, id)
-
-    @mcp.tool()
-    async def delete_trust_zone(
-        ctx: Context,
-        id: Optional[str] = Field(default=None, description="ID of the trust zone to delete (required for single item mode)"),
-        ids: Optional[List[str]] = Field(default=None, description="Optional list of trust zone IDs to delete in batch. When provided, the 'id' parameter is ignored."),
-    ) -> str:
-        """Delete a trust zone. Supports batch operations via the 'ids' parameter.
-
-        This tool deletes one or more trust zones from the system architecture.
-        For single item: provide the id directly.
-        For batch: provide a list of IDs in the 'ids' parameter.
-
-        Args:
-            ctx: MCP context for logging and error handling
-            id: ID of the trust zone to delete (required for single item mode)
-            ids: Optional list of trust zone IDs for batch deletion
-
-        Returns:
-            A confirmation message
-        """
-        return await batch_delete(ctx, ids, id, delete_trust_zone_impl, "trust zone")
-
-    @mcp.tool()
-    async def add_component_to_zone(
-        ctx: Context,
-        zone_id: str = Field(default=None, description="ID of the trust zone (required for single item mode)"),
-        component_id: str = Field(default=None, description="ID of the component to add (required for single item mode)"),
-        items: Optional[List[Dict[str, Any]]] = Field(default=None, description="Optional list of zone-component pairs to add in batch. Each dict should contain 'zone_id' and 'component_id'. When provided, individual parameters are ignored."),
-    ) -> str:
-        """Add a component to a trust zone. Supports batch operations via the 'items' parameter.
-
-        This tool adds one or more components to trust zones in the system architecture.
-        For single item: provide zone_id and component_id directly.
-        For batch: provide a list of dicts in the 'items' parameter.
-
-        Args:
-            ctx: MCP context for logging and error handling
-            zone_id: ID of the trust zone (required for single item mode)
-            component_id: ID of the component to add (required for single item mode)
-            items: Optional list of zone-component pair dicts for batch operation
-
-        Returns:
-            A confirmation message
-        """
-        return await batch_add(
-            ctx, items,
-            {"zone_id": zone_id, "component_id": component_id},
-            add_component_to_zone_impl, "component-to-zone assignment"
-        )
-
-    @mcp.tool()
-    async def remove_component_from_zone(
-        ctx: Context,
-        zone_id: str = Field(description="ID of the trust zone"),
-        component_id: str = Field(description="ID of the component to remove"),
-    ) -> str:
-        """Remove a component from a trust zone.
-
-        This tool removes a component from a trust zone in the system architecture.
-
-        Args:
-            ctx: MCP context for logging and error handling
-            zone_id: ID of the trust zone
-            component_id: ID of the component to remove
-
-        Returns:
-            A confirmation message
-        """
-        return await remove_component_from_zone_impl(ctx, zone_id, component_id)
-
-    # Crossing Point Management
-    @mcp.tool()
-    async def add_crossing_point(
-        ctx: Context,
-        source_zone_id: str = Field(default=None, description="ID of the source trust zone (required for single item mode)"),
-        destination_zone_id: str = Field(default=None, description="ID of the destination trust zone (required for single item mode)"),
-        authentication_method: Optional[str] = Field(default=None, description="Authentication method used at the crossing point"),
-        authorization_method: Optional[str] = Field(default=None, description="Authorization method used at the crossing point"),
-        description: Optional[str] = Field(default=None, description="Description of the crossing point"),
-        items: Optional[List[Dict[str, Any]]] = Field(default=None, description="Optional list of crossing points to add in batch. Each dict should contain 'source_zone_id', 'destination_zone_id', and optionally 'authentication_method', 'authorization_method', 'description'. When provided, individual parameters are ignored."),
-    ) -> str:
-        """Add a new crossing point. Supports batch operations via the 'items' parameter.
-
-        This tool adds one or more crossing points between trust zones in the system architecture.
-        For single item: provide source_zone_id, destination_zone_id, and optional fields directly.
-        For batch: provide a list of crossing point dicts in the 'items' parameter.
-
-        Args:
-            ctx: MCP context for logging and error handling
-            source_zone_id: ID of the source trust zone (required for single item mode)
-            destination_zone_id: ID of the destination trust zone (required for single item mode)
-            authentication_method: Authentication method used at the crossing point
-            authorization_method: Authorization method used at the crossing point
-            description: Description of the crossing point
-            items: Optional list of crossing point dicts for batch operation
-
-        Returns:
-            A confirmation message with the crossing point ID(s)
-        """
-        return await batch_add(
-            ctx, items,
-            {"source_zone_id": source_zone_id, "destination_zone_id": destination_zone_id,
-             "authentication_method": authentication_method, "authorization_method": authorization_method,
-             "description": description},
-            add_crossing_point_impl, "crossing point"
-        )
-
-    @mcp.tool()
-    async def update_crossing_point(
-        ctx: Context,
-        id: str = Field(default=None, description="ID of the crossing point to update (required for single item mode)"),
-        source_zone_id: Optional[str] = Field(default=None, description="New ID of the source trust zone"),
-        destination_zone_id: Optional[str] = Field(default=None, description="New ID of the destination trust zone"),
-        authentication_method: Optional[str] = Field(default=None, description="New authentication method"),
-        authorization_method: Optional[str] = Field(default=None, description="New authorization method"),
-        description: Optional[str] = Field(default=None, description="New description of the crossing point"),
-        items: Optional[List[Dict[str, Any]]] = Field(default=None, description="Optional list of crossing points to update in batch. Each dict must contain 'id' and any fields to update. When provided, individual parameters are ignored."),
-    ) -> str:
-        """Update an existing crossing point. Supports batch operations via the 'items' parameter.
-
-        This tool updates one or more existing crossing points in the system architecture.
-        For single item: provide id and fields to update directly.
-        For batch: provide a list of crossing point dicts in the 'items' parameter (each must include 'id').
-
-        Args:
-            ctx: MCP context for logging and error handling
-            id: ID of the crossing point to update (required for single item mode)
-            source_zone_id: New ID of the source trust zone
-            destination_zone_id: New ID of the destination trust zone
-            authentication_method: New authentication method
-            authorization_method: New authorization method
-            description: New description of the crossing point
-            items: Optional list of crossing point dicts for batch update
-
-        Returns:
-            A confirmation message
-        """
-        return await batch_update(
-            ctx, items,
-            {"id": id, "source_zone_id": source_zone_id, "destination_zone_id": destination_zone_id,
-             "authentication_method": authentication_method, "authorization_method": authorization_method,
-             "description": description},
-            update_crossing_point_impl, "crossing point"
-        )
-
-    @mcp.tool()
-    async def list_crossing_points(
-        ctx: Context,
-        zone_id: Optional[str] = Field(default=None, description="Optional trust zone ID to filter crossing points"),
-    ) -> str:
-        """List all crossing points.
-
-        This tool lists all crossing points in the system architecture.
-
-        Args:
-            ctx: MCP context for logging and error handling
-            zone_id: Optional trust zone ID to filter crossing points
-
-        Returns:
-            A markdown-formatted list of crossing points
-        """
-        return await list_crossing_points_impl(ctx, zone_id)
-
-    @mcp.tool()
-    async def get_crossing_point(
-        ctx: Context,
-        id: str = Field(description="ID of the crossing point to retrieve"),
-    ) -> str:
-        """Get details about a specific crossing point.
-
-        This tool retrieves details about a specific crossing point in the system architecture.
-
-        Args:
-            ctx: MCP context for logging and error handling
-            id: ID of the crossing point to retrieve
-
-        Returns:
-            A markdown-formatted description of the crossing point
-        """
-        return await get_crossing_point_impl(ctx, id)
-
-    @mcp.tool()
-    async def delete_crossing_point(
-        ctx: Context,
-        id: Optional[str] = Field(default=None, description="ID of the crossing point to delete (required for single item mode)"),
-        ids: Optional[List[str]] = Field(default=None, description="Optional list of crossing point IDs to delete in batch. When provided, the 'id' parameter is ignored."),
-    ) -> str:
-        """Delete a crossing point. Supports batch operations via the 'ids' parameter.
-
-        This tool deletes one or more crossing points from the system architecture.
-        For single item: provide the id directly.
-        For batch: provide a list of IDs in the 'ids' parameter.
-
-        Args:
-            ctx: MCP context for logging and error handling
-            id: ID of the crossing point to delete (required for single item mode)
-            ids: Optional list of crossing point IDs for batch deletion
-
-        Returns:
-            A confirmation message
-        """
-        return await batch_delete(ctx, ids, id, delete_crossing_point_impl, "crossing point")
-
-    @mcp.tool()
-    async def add_conn_to_crossing(
-        ctx: Context,
-        crossing_point_id: str = Field(default=None, description="ID of the crossing point (required for single item mode)"),
-        connection_id: str = Field(default=None, description="ID of the connection to add (required for single item mode)"),
-        items: Optional[List[Dict[str, Any]]] = Field(default=None, description="Optional list of crossing-point-connection pairs to add in batch. Each dict should contain 'crossing_point_id' and 'connection_id'. When provided, individual parameters are ignored."),
-    ) -> str:
-        """Add a connection to a crossing point. Supports batch operations via the 'items' parameter.
-
-        This tool adds one or more connections to crossing points in the system architecture.
-        For single item: provide crossing_point_id and connection_id directly.
-        For batch: provide a list of dicts in the 'items' parameter.
-
-        Args:
-            ctx: MCP context for logging and error handling
-            crossing_point_id: ID of the crossing point (required for single item mode)
-            connection_id: ID of the connection to add (required for single item mode)
-            items: Optional list of crossing-point-connection pair dicts for batch operation
-
-        Returns:
-            A confirmation message
-        """
-        return await batch_add(
-            ctx, items,
-            {"crossing_point_id": crossing_point_id, "connection_id": connection_id},
-            add_connection_to_crossing_point_impl, "connection-to-crossing-point assignment"
-        )
-
-    @mcp.tool()
-    async def remove_conn_from_crossing(
-        ctx: Context,
-        crossing_point_id: str = Field(description="ID of the crossing point"),
-        connection_id: str = Field(description="ID of the connection to remove"),
-    ) -> str:
-        """Remove a connection from a crossing point.
-
-        This tool removes a connection from a crossing point in the system architecture.
-
-        Args:
-            ctx: MCP context for logging and error handling
-            crossing_point_id: ID of the crossing point
-            connection_id: ID of the connection to remove
-
-        Returns:
-            A confirmation message
-        """
-        return await remove_connection_from_crossing_point_impl(ctx, crossing_point_id, connection_id)
-
-    # Trust Boundary Management
-    @mcp.tool()
-    async def add_trust_boundary(
-        ctx: Context,
-        name: str = Field(default=None, description="Name of the trust boundary (required for single item mode)"),
-        type: str = Field(default=None, description="Type of the trust boundary (required for single item mode)"),
-        crossing_point_ids: List[str] = Field(default=[], description="IDs of crossing points that cross this boundary"),
-        controls: List[str] = Field(default=[], description="Security controls implemented at this boundary"),
-        description: Optional[str] = Field(default=None, description="Description of the trust boundary"),
-        items: Optional[List[Dict[str, Any]]] = Field(default=None, description="Optional list of trust boundaries to add in batch. Each dict should contain 'name', 'type', and optionally 'crossing_point_ids', 'controls', 'description'. When provided, individual parameters are ignored."),
-    ) -> str:
-        """Add a new trust boundary. Supports batch operations via the 'items' parameter.
-
-        This tool adds one or more trust boundaries to the system architecture.
-        For single item: provide name, type, and optional fields directly.
-        For batch: provide a list of trust boundary dicts in the 'items' parameter.
-
-        Args:
-            ctx: MCP context for logging and error handling
-            name: Name of the trust boundary (required for single item mode)
-            type: Type of the trust boundary (required for single item mode)
-            crossing_point_ids: IDs of crossing points that cross this boundary
-            controls: Security controls implemented at this boundary
-            description: Description of the trust boundary
-            items: Optional list of trust boundary dicts for batch operation
-
-        Returns:
-            A confirmation message with the trust boundary ID(s)
-        """
-        return await batch_add(
-            ctx, items,
-            {"name": name, "type": type, "crossing_point_ids": crossing_point_ids,
-             "controls": controls, "description": description},
-            add_trust_boundary_impl, "trust boundary"
-        )
-
-    @mcp.tool()
-    async def update_trust_boundary(
-        ctx: Context,
-        id: str = Field(default=None, description="ID of the trust boundary to update (required for single item mode)"),
-        name: Optional[str] = Field(default=None, description="New name of the trust boundary"),
-        type: Optional[str] = Field(default=None, description="New type of the trust boundary"),
-        crossing_point_ids: Optional[List[str]] = Field(default=None, description="New IDs of crossing points"),
-        controls: Optional[List[str]] = Field(default=None, description="New security controls"),
-        description: Optional[str] = Field(default=None, description="New description of the trust boundary"),
-        items: Optional[List[Dict[str, Any]]] = Field(default=None, description="Optional list of trust boundaries to update in batch. Each dict must contain 'id' and any fields to update. When provided, individual parameters are ignored."),
-    ) -> str:
-        """Update an existing trust boundary. Supports batch operations via the 'items' parameter.
-
-        This tool updates one or more existing trust boundaries in the system architecture.
-        For single item: provide id and fields to update directly.
-        For batch: provide a list of trust boundary dicts in the 'items' parameter (each must include 'id').
-
-        Args:
-            ctx: MCP context for logging and error handling
-            id: ID of the trust boundary to update (required for single item mode)
-            name: New name of the trust boundary
-            type: New type of the trust boundary
-            crossing_point_ids: New IDs of crossing points
-            controls: New security controls
-            description: New description of the trust boundary
-            items: Optional list of trust boundary dicts for batch update
-
-        Returns:
-            A confirmation message
-        """
-        return await batch_update(
-            ctx, items,
-            {"id": id, "name": name, "type": type, "crossing_point_ids": crossing_point_ids,
-             "controls": controls, "description": description},
-            update_trust_boundary_impl, "trust boundary"
-        )
-
-    @mcp.tool()
-    async def list_trust_boundaries(
-        ctx: Context,
-        type: Optional[str] = Field(default=None, description="Optional type to filter trust boundaries"),
-    ) -> str:
-        """List all trust boundaries.
-
-        This tool lists all trust boundaries in the system architecture.
-
-        Args:
-            ctx: MCP context for logging and error handling
-            type: Optional type to filter trust boundaries
-
-        Returns:
-            A markdown-formatted list of trust boundaries
-        """
-        return await list_trust_boundaries_impl(ctx, type)
-
-    @mcp.tool()
-    async def get_trust_boundary(
-        ctx: Context,
-        id: str = Field(description="ID of the trust boundary to retrieve"),
-    ) -> str:
-        """Get details about a specific trust boundary.
-
-        This tool retrieves details about a specific trust boundary in the system architecture.
-
-        Args:
-            ctx: MCP context for logging and error handling
-            id: ID of the trust boundary to retrieve
-
-        Returns:
-            A markdown-formatted description of the trust boundary
-        """
-        return await get_trust_boundary_impl(ctx, id)
-
-    @mcp.tool()
-    async def delete_trust_boundary(
-        ctx: Context,
-        id: Optional[str] = Field(default=None, description="ID of the trust boundary to delete (required for single item mode)"),
-        ids: Optional[List[str]] = Field(default=None, description="Optional list of trust boundary IDs to delete in batch. When provided, the 'id' parameter is ignored."),
-    ) -> str:
-        """Delete a trust boundary. Supports batch operations via the 'ids' parameter.
-
-        This tool deletes one or more trust boundaries from the system architecture.
-        For single item: provide the id directly.
-        For batch: provide a list of IDs in the 'ids' parameter.
-
-        Args:
-            ctx: MCP context for logging and error handling
-            id: ID of the trust boundary to delete (required for single item mode)
-            ids: Optional list of trust boundary IDs for batch deletion
-
-        Returns:
-            A confirmation message
-        """
-        return await batch_delete(ctx, ids, id, delete_trust_boundary_impl, "trust boundary")
-
-    @mcp.tool()
-    async def get_trust_boundary_analysis_plan(
-        ctx: Context,
-    ) -> str:
-        """Get a comprehensive trust boundary analysis plan.
-
-        This tool returns a detailed plan for analyzing trust boundaries for security concerns
-        using AI-powered analysis with AWS documentation validation.
-
-        Args:
-            ctx: MCP context for logging and error handling
-
-        Returns:
-            A markdown-formatted trust boundary analysis plan with prompts for LLM analysis
-        """
-        return await get_trust_boundary_analysis_plan_impl(ctx)
-
-    @mcp.tool()
-    async def clear_trust_boundaries(
-        ctx: Context,
-    ) -> str:
-        """Clear all trust boundaries.
-
-        This tool clears all trust boundaries, crossing points, and trust zones from the system architecture.
-
-        Args:
-            ctx: MCP context for logging and error handling
-
-        Returns:
-            A confirmation message
-        """
-        return await clear_trust_boundaries_impl(ctx)

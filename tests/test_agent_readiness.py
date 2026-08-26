@@ -3,10 +3,8 @@
 Each class covers one of them:
 
 1. Pre-loaded reference data satisfied phase gates and was exported as project data.
-2. ``get_current_phase_status`` always failed: the registered tool shadowed the
-   module-level function of the same name and called itself. The server
-   instructions advertise it, and ``advance_phase``'s own refusal message tells a
-   blocked agent to call it.
+2. The workflow status action must remain callable through the public MCP
+   dispatcher when phase advancement is blocked.
 3. ``batch_update``/``batch_delete`` counted an impl's "not found" message as a
    success, reporting "Successfully deleted 1" for an ID that never existed.
 4. A malformed ``items=[...]`` entry surfaced a raw ``TypeError`` naming the
@@ -22,7 +20,7 @@ import threat_modeling_mcp_server.tools.threat_actor_analyzer as taa
 import threat_modeling_mcp_server.tools.trust_boundary_analyzer as tba
 from threat_modeling_mcp_server.tools.step_orchestrator import (
     detect_phase_completion,
-    get_current_phase_status_impl,
+    get_workflow_status,
     phase_completion,
 )
 from threat_modeling_mcp_server.utils.batch_utils import (
@@ -56,7 +54,9 @@ class TestPreloadedDefaultsDoNotCountAsWork:
         assert summary["threat_actors"] > 0
         assert summary["reviewed_threat_actors"] == 0
         assert summary["trust_boundaries"]["trust_zones"] == 0
-        assert summary["asset_flows"] == {"assets": 0, "flows": 0}
+        assert summary["asset_flows"]["assets"] == 0
+        assert summary["asset_flows"]["flows"] == 0
+        assert summary["asset_flows"]["is_complete"] is False
 
     def test_cold_server_reports_no_phase_complete(self, only_defaults):
         detect_phase_completion()
@@ -64,7 +64,7 @@ class TestPreloadedDefaultsDoNotCountAsWork:
         assert phase_completion[3] == 0.0
         assert phase_completion[4] == 0.0
         assert phase_completion[5] == 0.0
-        assert get_current_phase_status_impl()["overall_completion"] == 0.0
+        assert get_workflow_status()["overall_completion"] == 0.0
 
     @pytest.mark.asyncio
     async def test_assessing_a_default_actor_completes_phase_3(self, only_defaults):
@@ -83,7 +83,7 @@ class TestPreloadedDefaultsDoNotCountAsWork:
         # Step 3 of the documented Phase 3 workflow. Ruling an actor *out* is a
         # decision too, so is_relevant=False has to count.
         actor_id = next(iter(taa.threat_actors))
-        await taa.set_threat_actor_relevance_impl(
+        await taa.update_threat_actor_impl(
             AsyncMock(), id=actor_id, is_relevant=False
         )
 
@@ -91,22 +91,15 @@ class TestPreloadedDefaultsDoNotCountAsWork:
         assert phase_completion[3] == 1.0
 
     @pytest.mark.asyncio
-    async def test_set_priority_completes_phase_3(self, only_defaults):
-        # Step 4 of the documented Phase 3 workflow.
-        actor_id = next(iter(taa.threat_actors))
-        await taa.set_threat_actor_priority_impl(AsyncMock(), id=actor_id, priority=2)
-
-        detect_phase_completion()
-        assert phase_completion[3] == 1.0
-
-    @pytest.mark.asyncio
-    async def test_adding_a_zone_completes_phase_4(self, only_defaults):
+    async def test_adding_a_zone_without_nodes_does_not_complete_phase_4(
+        self, only_defaults
+    ):
         await tba.add_trust_zone_impl(
             AsyncMock(), name="Payments VPC", trust_level="Medium"
         )
 
         detect_phase_completion()
-        assert phase_completion[4] == 1.0
+        assert phase_completion[4] == 0.0
 
     @pytest.mark.asyncio
     async def test_clear_trust_boundaries_stays_empty(self, only_defaults):
@@ -140,13 +133,15 @@ class TestPreloadedDefaultsDoNotCountAsWork:
         assert result == "No trust zones have been added yet."
 
     @pytest.mark.asyncio
-    async def test_adding_an_asset_completes_phase_5(self, only_defaults):
+    async def test_adding_an_asset_without_a_flow_does_not_complete_phase_5(
+        self, only_defaults
+    ):
         await afa.add_asset_impl(
             AsyncMock(), name="Card number", type="Data", classification="Restricted"
         )
 
         detect_phase_completion()
-        assert phase_completion[5] == 1.0
+        assert phase_completion[5] == 0.0
 
 
 class TestExportSeparatesTheCatalogue:
@@ -214,8 +209,8 @@ class TestExportSeparatesTheCatalogue:
         assert data["assets"] == []
 
 
-class TestGetCurrentPhaseStatusTool:
-    """The tool an agent is told to call when advance_phase refuses."""
+class TestWorkflowStatusTool:
+    """The status action recommended when workflow advancement is refused."""
 
     @pytest.mark.asyncio
     async def test_registered_tool_returns_a_status(self):
@@ -226,13 +221,13 @@ class TestGetCurrentPhaseStatusTool:
         mcp = FastMCP("test")
         step_orchestrator.register_tools(mcp)
 
-        # Called the way a client calls it: through FastMCP, not by reaching for
-        # the module-level function. The registered closure used to shadow that
-        # function and recurse into itself, so every call failed.
-        result = await mcp.call_tool("get_current_phase_status", {})
+        result = await mcp.call_tool(
+            "manage_workflow",
+            {"action": "status"},
+        )
 
-        assert "current_phase" in str(result)
-        assert "overall_completion" in str(result)
+        assert "Current Phase" in str(result)
+        assert "Overall Completion" in str(result)
 
 
 class TestBatchFailuresAreReported:

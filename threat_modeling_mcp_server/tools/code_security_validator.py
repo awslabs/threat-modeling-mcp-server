@@ -168,11 +168,6 @@ def _coverage_status() -> Dict[str, Any]:
     }
 
 
-def code_validation_is_complete() -> bool:
-    """Return whether the current code-validation snapshot is complete."""
-    return _coverage_status()["is_complete"]
-
-
 def clear_code_validation_state() -> None:
     """Clear all recorded code-validation state in place."""
     global validation_project_directory, report_fingerprint
@@ -452,7 +447,8 @@ def code_validation_guide() -> str:
     """Return the compact contract for recording validation findings."""
     return """# Code Validation Manager
 
-Use the project directory already recorded with `set_project_directory_tool`.
+Use the project directory already recorded with
+`manage_workflow(action="set_project", directory=PROJECT_DIRECTORY)`.
 Inspect the code yourself, then call `action="record"` with a `values` object:
 
 ```json

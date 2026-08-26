@@ -5,31 +5,20 @@ from unittest.mock import AsyncMock
 
 from threat_modeling_mcp_server.tools.architecture_analyzer import (
     add_component_impl, update_component_impl, delete_component_impl,
-    components, architecture
+    components,
 )
 from threat_modeling_mcp_server.tools.assumption_manager import (
-    add_assumption_impl, update_assumption_impl, delete_assumption_impl,
-    assumptions
-)
-from threat_modeling_mcp_server.tools.threat_actor_analyzer import (
-    add_threat_actor_impl, update_threat_actor_impl, delete_threat_actor_impl,
-    threat_actors, initialize_threat_actors
+    add_assumption_impl, delete_assumption_impl, assumptions
 )
 from threat_modeling_mcp_server.tools.threat_generator import (
-    add_threat_impl, update_threat_impl, delete_threat_impl,
-    add_mitigation_impl, update_mitigation_impl, delete_mitigation_impl,
-    threats, mitigations
+    add_threat_impl, delete_threat_impl, add_mitigation_impl, threats, mitigations
 )
 from threat_modeling_mcp_server.tools.asset_flow_analyzer import (
-    add_asset_impl, update_asset_impl, delete_asset_impl,
-    add_flow_impl, update_flow_impl, delete_flow_impl,
-    assets, flows
+    add_asset_impl, delete_asset_impl, assets, flows
 )
 from threat_modeling_mcp_server.tools.trust_boundary_analyzer import (
-    add_trust_zone_impl, update_trust_zone_impl, delete_trust_zone_impl,
-    add_crossing_point_impl, delete_crossing_point_impl,
-    add_trust_boundary_impl, delete_trust_boundary_impl,
-    trust_zones, crossing_points, trust_boundaries
+    add_trust_zone_impl, delete_trust_zone_impl,
+    trust_zones, crossing_points, trust_boundaries,
 )
 from threat_modeling_mcp_server.utils.batch_utils import batch_add, batch_update, batch_delete
 
@@ -44,9 +33,6 @@ def ctx():
 def clear_state():
     """Clear global state before each test."""
     components.clear()
-    architecture.components = []
-    architecture.connections = []
-    architecture.data_stores = []
     assumptions.clear()
     threats.clear()
     mitigations.clear()
@@ -64,7 +50,7 @@ def clear_state():
 
 class TestBatchAddComponents:
     async def test_single_item_mode(self, ctx):
-        """Single item mode still works (backwards compat)."""
+        """Single-item mode uses the same batch helper."""
         result = await batch_add(
             ctx, None,
             {"name": "Web Server", "type": "Compute"},

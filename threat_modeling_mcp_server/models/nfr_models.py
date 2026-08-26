@@ -107,7 +107,7 @@ class NFRProfile(BaseModel):
 
     @model_validator(mode='after')
     def validate_one_entry_per_class(self):
-        """Reject duplicate classes so get_level() has a single answer."""
+        """Reject duplicate quality classes."""
         seen = [r.quality_class for r in self.requirements]
         duplicates = {c.value for c in seen if seen.count(c) > 1}
         if duplicates:
@@ -116,10 +116,3 @@ class NFRProfile(BaseModel):
                 f"Duplicated: {', '.join(sorted(duplicates))}"
             )
         return self
-
-    def get_level(self, quality_class: QualityClass) -> Optional[str]:
-        """Return the assigned level for a class, or None if not in scope."""
-        for requirement in self.requirements:
-            if requirement.quality_class == quality_class:
-                return requirement.level
-        return None

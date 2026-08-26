@@ -16,14 +16,12 @@ from threat_modeling_mcp_server.models.threat_models import (
     MitigationEffectiveness,
     MetadataItem,
     MitigationLink,
-    ThreatModel,
 )
 from threat_modeling_mcp_server.models.models import SensitivityTier
 from threat_modeling_mcp_server.models.architecture_models import (
     Component,
     Connection,
     DataStore,
-    Architecture,
     ComponentType,
     ServiceProvider,
     Protocol,
@@ -169,17 +167,12 @@ class TestMitigationModel:
             cost="Medium",
             effectiveness="High",
             implementation_details="Configure TLS 1.3",
-            responsible_party="Security Team",
-            verification_method="SSL scan",
-            estimated_time_to_implement=5,
-            risk_reduction=0.75,
         )
         assert mitigation.status == MitigationStatus.IN_PROGRESS
         assert mitigation.type == MitigationType.PREVENTIVE
         assert mitigation.cost == MitigationCost.MEDIUM
         assert mitigation.effectiveness == MitigationEffectiveness.HIGH
-        assert mitigation.estimated_time_to_implement == 5
-        assert mitigation.risk_reduction == 0.75
+        assert mitigation.implementation_details == "Configure TLS 1.3"
 
     def test_mitigation_status_case_insensitive(self):
         """Test that mitigation status accepts case-insensitive values."""
@@ -225,29 +218,6 @@ class TestMitigationLink:
         )
         assert link.linkedId == "T1"
         assert link.mitigationId == "M1"
-
-
-class TestThreatModelContainer:
-    """Tests for the ThreatModel container model."""
-
-    def test_create_empty_threat_model(self):
-        """Test creating an empty threat model."""
-        model = ThreatModel()
-        assert model.schema_version == 1
-        assert model.threats == []
-        assert model.mitigations == []
-        assert model.assumptions == []
-
-    def test_create_threat_model_with_data(self):
-        """Test creating a threat model with data."""
-        model = ThreatModel(
-            applicationInfo={"name": "Test App", "description": "A test application"},
-            threats=[{"id": "T1", "statement": "Test threat"}],
-            mitigations=[{"id": "M1", "content": "Test mitigation"}],
-        )
-        assert model.applicationInfo["name"] == "Test App"
-        assert len(model.threats) == 1
-        assert len(model.mitigations) == 1
 
 
 class TestComponentModel:
@@ -383,30 +353,6 @@ class TestDataStoreModel:
         )
         assert data_store.type == DataStoreType.CACHE
         assert data_store.classification == SensitivityTier.INTERNAL
-
-
-class TestArchitectureModel:
-    """Tests for the Architecture container model."""
-
-    def test_create_empty_architecture(self):
-        """Test creating an empty architecture."""
-        arch = Architecture()
-        assert arch.components == []
-        assert arch.connections == []
-        assert arch.data_stores == []
-        assert arch.description == ""
-
-    def test_create_architecture_with_components(self):
-        """Test creating an architecture with components."""
-        component = Component(id="C1", name="Server", type="Compute")
-        arch = Architecture(
-            components=[component],
-            description="Test architecture",
-        )
-        assert len(arch.components) == 1
-        assert arch.description == "Test architecture"
-
-
 class TestEnumValues:
     """Tests to verify enum values are correctly defined."""
 

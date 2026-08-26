@@ -1,8 +1,8 @@
 """Threat and Mitigation models for the Threat Modeling MCP Server."""
 
 from enum import Enum
-from typing import Dict, List, Optional, Any
-from pydantic import BaseModel, Field, field_validator
+from typing import List, Optional
+from pydantic import BaseModel, Field, field_validator, model_validator
 from threat_modeling_mcp_server.validation.enum_validator import validate_enum_with_enhanced_error
 
 
@@ -37,6 +37,14 @@ class ThreatStatus(str, Enum):
     IDENTIFIED = "threatIdentified"
     RESOLVED = "threatResolved"
     NOT_USEFUL = "threatResolvedNotUseful"
+
+
+class ResidualRiskDecision(str, Enum):
+    """Decision made after considering linked mitigations."""
+    OPEN = "Open"
+    ACCEPTED = "Accepted"
+    MITIGATED = "Mitigated"
+    NOT_APPLICABLE = "Not Applicable"
 
 
 class MitigationType(str, Enum):
@@ -95,8 +103,6 @@ class Threat(BaseModel):
     severity: Optional[ThreatSeverity] = None
     likelihood: Optional[ThreatLikelihood] = None
     affected_components: List[str] = []
-    affected_trust_boundaries: List[str] = []
-    residual_risk_level: Optional[int] = None  # 1-5 scale
     
     @field_validator('status', mode='before')
     @classmethod
@@ -132,10 +138,6 @@ class Mitigation(BaseModel):
     cost: Optional[MitigationCost] = None
     effectiveness: Optional[MitigationEffectiveness] = None
     implementation_details: Optional[str] = None
-    responsible_party: Optional[str] = None
-    verification_method: Optional[str] = None
-    estimated_time_to_implement: Optional[int] = None  # in days
-    risk_reduction: Optional[float] = None  # percentage
     
     @field_validator('status', mode='before')
     @classmethod
@@ -164,34 +166,52 @@ class MitigationLink(BaseModel):
     mitigationId: str
 
 
-class ThreatModel(BaseModel):
-    """Model for a complete threat model."""
-    model_config = {"populate_by_name": True}
-    
-    schema_version: int = Field(default=1, alias="schema")
-    applicationInfo: Dict[str, str] = {"name": "", "description": ""}
-    architecture: Dict[str, str] = {"description": ""}
-    dataflow: Dict[str, str] = {"description": ""}
-    assumptions: List[Dict[str, Any]] = []
-    mitigations: List[Dict[str, Any]] = []
-    assumptionLinks: List[Dict[str, Any]] = []
-    mitigationLinks: List[Dict[str, Any]] = []
-    threats: List[Dict[str, Any]] = []
-    
-    businessContext: Dict[str, Any] = {}
-    components: List[Dict[str, Any]] = []
-    connections: List[Dict[str, Any]] = []
-    dataStores: List[Dict[str, Any]] = []
-    threatActors: List[Dict[str, Any]] = []
-    trustZones: List[Dict[str, Any]] = []
-    crossingPoints: List[Dict[str, Any]] = []
-    trustBoundaries: List[Dict[str, Any]] = []
-    assets: List[Dict[str, Any]] = []
-    flows: List[Dict[str, Any]] = []
-    softwareProfile: Dict[str, Any] = {}
-    dataAssetProfiles: List[Dict[str, Any]] = []
-    userPersonas: List[Dict[str, Any]] = []
-    nonFunctionalRequirements: List[Dict[str, Any]] = []
-    phaseProgress: Dict[str, Any] = {}
-    referenceCatalogue: Dict[str, Any] = {}
-    metadata: Dict[str, Any] = {}
+class ResidualRiskAssessment(BaseModel):
+    """Residual-risk decision for one threat at a specific model state."""
+    threat_id: str
+    decision: ResidualRiskDecision
+    residual_severity: Optional[ThreatSeverity] = None
+    residual_likelihood: Optional[ThreatLikelihood] = None
+    rationale: str = Field(min_length=1)
+    source_fingerprint: str
+
+    @field_validator('decision', mode='before')
+    @classmethod
+    def validate_decision(cls, v):
+        return validate_enum_with_enhanced_error(v, ResidualRiskDecision, 'decision')
+
+    @field_validator('residual_severity', mode='before')
+    @classmethod
+    def validate_residual_severity(cls, v):
+        return validate_enum_with_enhanced_error(
+            v, ThreatSeverity, 'residual_severity'
+        )
+
+    @field_validator('residual_likelihood', mode='before')
+    @classmethod
+    def validate_residual_likelihood(cls, v):
+        return validate_enum_with_enhanced_error(
+            v, ThreatLikelihood, 'residual_likelihood'
+        )
+
+    @field_validator('rationale')
+    @classmethod
+    def validate_rationale(cls, v):
+        if not v.strip():
+            raise ValueError("Field 'rationale' must not be blank")
+        return v.strip()
+
+    @model_validator(mode='after')
+    def validate_residual_risk(self):
+        if self.decision is not ResidualRiskDecision.NOT_APPLICABLE:
+            missing = []
+            if self.residual_severity is None:
+                missing.append('residual_severity')
+            if self.residual_likelihood is None:
+                missing.append('residual_likelihood')
+            if missing:
+                raise ValueError(
+                    f"Decision '{self.decision.value}' requires: "
+                    + ", ".join(missing)
+                )
+        return self

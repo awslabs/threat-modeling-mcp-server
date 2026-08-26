@@ -79,8 +79,8 @@ manage_system_context(
 - `manage_system_context(action="plan", section="business")` -- Get detailed business-analysis guidance
 - `manage_system_context(action="validate", section="all")` -- Check the business gate and report profile coverage
 - `manage_system_context(action="clear", section=SECTION)` -- Clear one section or all context
-- `set_project_directory_tool(directory)` -- Record the project path used to decide whether Phase 7.5 applies
-- `add_assumption(description, category, impact, rationale)` -- Document scope decisions
+- `manage_workflow(action="set_project", directory=PROJECT_DIRECTORY)` -- Record the project path used to decide whether Phase 7.5 applies
+- `manage_assumptions(action="add", values=ASSUMPTION)` -- Document scope decisions
 
 The `software`, `data_assets`, `user_personas`, and `nfrs` sections hold the
 classification profiles. They are required by the agent workflow, but they are
@@ -88,13 +88,13 @@ not inputs to the server's Phase 1 completion gate.
 
 ## Workflow
 
-1. **Record the project path** with `set_project_directory_tool(directory=PROJECT_DIRECTORY)`
+1. **Record the project path** with `manage_workflow(action="set_project", directory=PROJECT_DIRECTORY)`
 2. **Read the codebase**: Examine README, config files, package manifests, and infrastructure code
 3. **Determine context**: What does the system do, who uses it, and what data does it handle?
 4. **Describe sections as needed** with `manage_system_context(action="describe", section=SECTION)`
 5. **Set the complete context once** with `action="set", section="all"`
 6. **Validate** with `action="validate", section="all"`; business context must pass
-7. **Document assumptions** with `add_assumption()` for scope decisions such as regional limits or peak-load expectations
+7. **Document assumptions** with `manage_assumptions(action="add", values=ASSUMPTION)` for scope decisions such as regional limits or peak-load expectations
    - "Peak load is 10x normal during sales events" (affects availability)
 
 ## Completion Criteria
@@ -103,7 +103,7 @@ not inputs to the server's Phase 1 completion gate.
 - [ ] Project directory recorded
 - [ ] Software, known data asset, user persona, and relevant NFR profiles recorded
 - [ ] Key assumptions documented
-- [ ] Call `advance_phase()` to proceed to Phase 2
+- [ ] Call `manage_workflow(action="advance")` to proceed to Phase 2
 
 ## Common Pitfalls
 - Setting only the description without the 12 required features

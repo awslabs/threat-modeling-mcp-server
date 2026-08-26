@@ -42,9 +42,15 @@ than one order.
 For tests that need the container-backed stores to be empty, request the
 `empty_threat_model_state` fixture. It clears dictionary and list stores and
 zeros `phase_completion`; it does not reset model or scalar globals. Initialize
-those explicitly when a test depends on them. Asset and flow defaults are
-seeded when `asset_flow_analyzer` is imported, while threat actor and trust
-boundary defaults are populated during initialization or server registration.
+those explicitly when a test depends on them. Asset, flow, and trust-boundary
+stores start empty. Threat actors are populated lazily from the default
+catalogue when actor operations require them.
+
+Public domain operations are registered in `tools/domain_managers.py`. The
+domain-specific analyzer modules retain the typed implementation functions and
+state stores but are not registered directly. When adding a manager operation
+or field, update its `describe` contract, server instructions, phase guidance,
+and MCP-boundary tests together.
 
 ## Project Structure
 

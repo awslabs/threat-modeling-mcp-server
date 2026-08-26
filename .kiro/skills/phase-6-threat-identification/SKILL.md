@@ -52,7 +52,10 @@ Can permissions be escalated?
 
 ## Tools Reference
 
-### add_threat(threat_source, prerequisites, threat_action, threat_impact, category, severity, likelihood, affected_components, affected_assets, tags)
+### manage_threats(action="add", section="threats", values=THREAT)
+
+Call `manage_threats(action="describe", section="threats")` first for the exact
+contract.
 
 **IMPORTANT**: Each text field max 200 characters.
 
@@ -71,17 +74,21 @@ Can permissions be escalated?
 
 **Example**:
 ```
-add_threat(
-  threat_source="external attacker",
-  prerequisites="with access to the login endpoint",
-  threat_action="perform credential stuffing attacks",
-  threat_impact="unauthorized access to user accounts",
-  category="Spoofing",
-  severity="High",
-  likelihood="Likely",
-  affected_components=["C001"],
-  affected_assets=["User Credentials"],
-  tags=["STRIDE-S", "authentication"]
+manage_threats(
+  action="add",
+  section="threats",
+  values={
+    "threat_source": "external attacker",
+    "prerequisites": "with access to the login endpoint",
+    "threat_action": "perform credential stuffing attacks",
+    "threat_impact": "unauthorized access to user accounts",
+    "category": "Spoofing",
+    "severity": "High",
+    "likelihood": "Likely",
+    "affected_components": ["C001"],
+    "affected_assets": ["User Credentials"],
+    "tags": ["STRIDE-S", "authentication"]
+  }
 )
 ```
 
@@ -105,18 +112,18 @@ add_threat(
 
 ## Workflow
 
-1. **Call `get_phase_6_guidance()`**
+1. **Call `manage_workflow(action="guidance", phase="6")`**
 2. **For each STRIDE category**, analyze every component and data flow
 3. **Add threats** with full parameters (source, prereqs, action, impact, category, severity, likelihood)
 4. **Tag threats** with STRIDE category and domain (e.g., "STRIDE-S", "authentication")
 5. **Link to components and assets** affected
 6. **If AWS**: Use `search_documentation()` to research service-specific threats
-7. **Review coverage** with `list_threats()` -- ensure all 6 STRIDE categories represented
+7. **Review coverage** with `manage_threats(action="list", section="threats")` -- ensure all 6 STRIDE categories represented
 
 ## Completion Criteria
 - [ ] Threats identified across all 6 STRIDE categories
 - [ ] Each threat has category, severity, and likelihood
 - [ ] Threats linked to affected components and assets
 - [ ] AWS-specific threats included (if applicable)
-- [ ] `list_threats()` shows comprehensive inventory
-- [ ] Call `advance_phase()` to proceed to Phase 7
+- [ ] `manage_threats(action="list", section="threats")` shows comprehensive inventory
+- [ ] Call `manage_workflow(action="advance")` to proceed to Phase 7

@@ -1,7 +1,7 @@
 """Architecture models for the Threat Modeling MCP Server."""
 
 from enum import Enum
-from typing import Dict, List, Optional, Any
+from typing import Any, Dict, Optional
 from pydantic import BaseModel, field_validator
 from threat_modeling_mcp_server.models.models import SensitivityTier
 from threat_modeling_mcp_server.validation.enum_validator import validate_enum_with_enhanced_error
@@ -156,11 +156,3 @@ class DataStore(BaseModel):
     @classmethod
     def validate_backup_frequency(cls, v):
         return validate_enum_with_enhanced_error(v, BackupFrequency, 'backup_frequency')
-
-
-class Architecture(BaseModel):
-    """Model for the system architecture."""
-    components: List[Component] = []
-    connections: List[Connection] = []
-    data_stores: List[DataStore] = []
-    description: str = ""

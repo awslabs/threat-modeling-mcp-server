@@ -276,17 +276,15 @@ class TestDocumentationTracksToolRegistry:
     def test_kiro_asset_guidance_matches_model_fields(self):
         from pathlib import Path
         from threat_modeling_mcp_server.models.asset_flow_models import Asset
+        from threat_modeling_mcp_server.tools.domain_managers import asset_flow_guide
 
         prompt = (
             Path(__file__).resolve().parent.parent
             / ".kiro/prompts/threat-modeler.md"
         ).read_text()
-        add_asset_lines = [
-            line for line in prompt.splitlines() if "`add_asset()`" in line
-        ]
-        assert add_asset_lines
+        assert 'manage_asset_flows(action="describe", section=SECTION)' in prompt
 
-        for line in add_asset_lines:
-            for field in re.findall(r"`(\w+)`", line):
-                if field != "add_asset":
-                    assert field in Asset.model_fields
+        guide = asset_flow_guide("assets")
+        for field in Asset.model_fields:
+            if field != "id":
+                assert f"`{field}`" in guide

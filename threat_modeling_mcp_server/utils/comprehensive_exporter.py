@@ -2,6 +2,7 @@
 
 import json
 import os
+import uuid
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 from loguru import logger
@@ -119,15 +120,40 @@ def _truncate(value: str, max_length: int) -> str:
     return truncated
 
 
-def convert_threats_to_threat_composer_format(threats: Dict[str, Any]) -> List[Dict[str, Any]]:
+# Namespace used to stabilise the short-id -> UUID mapping across exports.
+_ID_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "threat-modeling-mcp-server/ids")
+
+
+def build_id_map(*stores: Dict[str, Any]) -> Dict[str, str]:
+    """Map internal short ids (T001, M001, ...) to Threat Composer UUIDs.
+
+    Threat Composer's schema requires ``id`` values (and the ids referenced by
+    ``mitigationLinks``) to be UUID strings of at least 36 characters. The
+    server issues compact ids like ``T001``/``M001`` instead, so a file that
+    exports them verbatim is rejected on import. The mapping is deterministic
+    (uuid5) so re-exporting the same model yields stable ids.
+    """
+    id_map: Dict[str, str] = {}
+    for store in stores:
+        for short_id in store:
+            if short_id not in id_map:
+                id_map[short_id] = str(uuid.uuid5(_ID_NAMESPACE, str(short_id)))
+    return id_map
+
+
+def convert_threats_to_threat_composer_format(
+    threats: Dict[str, Any], id_map: Optional[Dict[str, str]] = None
+) -> List[Dict[str, Any]]:
     """Convert threats to Threat Composer format.
 
     Args:
         threats: Dictionary of threat objects
+        id_map: Optional short-id -> UUID map; ids are rewritten when provided
 
     Returns:
         List of threats in Threat Composer format
     """
+    id_map = id_map or {}
     result = []
 
     for threat in threats.values():
@@ -146,7 +172,7 @@ def convert_threats_to_threat_composer_format(threats: Dict[str, Any]) -> List[D
 
         # Use only fields that are compatible with Threat Composer
         threat_dict = {
-            "id": threat.id,
+            "id": id_map.get(threat.id, threat.id),
             "numericId": threat.numericId,
             "threatSource": threat_source,
             "prerequisites": prerequisites,
@@ -166,15 +192,19 @@ def convert_threats_to_threat_composer_format(threats: Dict[str, Any]) -> List[D
     return result
 
 
-def convert_mitigations_to_threat_composer_format(mitigations: Dict[str, Any]) -> List[Dict[str, Any]]:
+def convert_mitigations_to_threat_composer_format(
+    mitigations: Dict[str, Any], id_map: Optional[Dict[str, str]] = None
+) -> List[Dict[str, Any]]:
     """Convert mitigations to Threat Composer format.
 
     Args:
         mitigations: Dictionary of mitigation objects
+        id_map: Optional short-id -> UUID map; ids are rewritten when provided
 
     Returns:
         List of mitigations in Threat Composer format
     """
+    id_map = id_map or {}
     result = []
 
     for mitigation in mitigations.values():
@@ -183,7 +213,7 @@ def convert_mitigations_to_threat_composer_format(mitigations: Dict[str, Any]) -
 
         # Use only fields that are compatible with Threat Composer
         mitigation_dict = {
-            "id": mitigation.id,
+            "id": id_map.get(mitigation.id, mitigation.id),
             "numericId": mitigation.numericId,
             "status": mitigation_status,
             "content": mitigation.content,
@@ -441,6 +471,19 @@ def export_threat_model_files(
     json_success = False
     json_size = 0
     try:
+        # Threat Composer requires UUID ids. Build a stable short-id -> UUID
+        # map covering threats and mitigations, and rewrite ids and the link
+        # references consistently so mitigationLinks still resolve.
+        id_map = build_id_map(state.threats, state.mitigations)
+
+        def _remap_link(link) -> Dict[str, Any]:
+            data = link.dict()
+            if "mitigationId" in data:
+                data["mitigationId"] = id_map.get(data["mitigationId"], data["mitigationId"])
+            if "linkedId" in data:
+                data["linkedId"] = id_map.get(data["linkedId"], data["linkedId"])
+            return data
+
         # Create comprehensive threat model with ONLY standard Threat Composer fields
         threat_model_data = {
             "schema": 1,
@@ -455,21 +498,31 @@ def export_threat_model_files(
                 "description": ""
             },
             "assumptions": convert_assumptions_to_threat_composer_format(state.assumptions),
-            "mitigations": convert_mitigations_to_threat_composer_format(state.mitigations),
+            "mitigations": convert_mitigations_to_threat_composer_format(state.mitigations, id_map),
             "assumptionLinks": [],
-            "mitigationLinks": [link.dict() for link in state.mitigation_links],
-            "threats": convert_threats_to_threat_composer_format(state.threats)
+            "mitigationLinks": [_remap_link(link) for link in state.mitigation_links],
+            "threats": convert_threats_to_threat_composer_format(state.threats, id_map)
         }
 
-        if include_extended_data:
-            threat_model_data.update(build_extended_export_data(state))
-
+        # The .tc.json file must satisfy the Threat Composer schema, whose
+        # top-level object is `additionalProperties: false` -- it rejects ANY
+        # key outside its fixed set (schema, applicationInfo, architecture,
+        # dataflow, assumptions, mitigations, assumptionLinks, mitigationLinks,
+        # threats, brainstorm). So extended taxonomy cannot live in this file,
+        # not even under a namespaced key. When requested, it is written to a
+        # separate sidecar file instead, keeping the .tc.json importable.
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(threat_model_data, f, indent=2, ensure_ascii=False)
 
         json_size = os.path.getsize(json_path)
         json_success = True
         logger.info(f"Successfully exported JSON threat model to {json_path}")
+
+        if include_extended_data:
+            extended_path = os.path.join(threatmodel_dir, f"{base_filename}.extended.json")
+            with open(extended_path, "w", encoding="utf-8") as f:
+                json.dump(build_extended_export_data(state), f, indent=2, ensure_ascii=False)
+            logger.info(f"Successfully exported extended data to {extended_path}")
 
     except Exception as e:
         logger.error(f"Failed to export JSON threat model: {str(e)}")

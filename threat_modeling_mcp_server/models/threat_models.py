@@ -1,7 +1,7 @@
 """Threat and Mitigation models for the Threat Modeling MCP Server."""
 
 from enum import Enum
-from typing import List, Optional
+from typing import Annotated, List, Optional
 from pydantic import BaseModel, Field, field_validator, model_validator
 from threat_modeling_mcp_server.validation.enum_validator import validate_enum_with_enhanced_error
 
@@ -91,13 +91,13 @@ class Threat(BaseModel):
     prerequisites: str = Field(max_length=200)
     threatAction: str = Field(max_length=200)
     threatImpact: str = Field(max_length=200)
-    impactedGoal: List[str] = []
-    impactedAssets: List[str] = []
+    impactedGoal: List[Annotated[str, Field(max_length=200)]] = []
+    impactedAssets: List[Annotated[str, Field(max_length=200)]] = []
     metadata: List[MetadataItem] = []
     statement: str = Field(max_length=1400)
     displayOrder: int
     status: ThreatStatus = ThreatStatus.IDENTIFIED
-    tags: List[str] = []
+    tags: List[Annotated[str, Field(max_length=30)]] = []
     
     category: Optional[ThreatCategory] = None
     severity: Optional[ThreatSeverity] = None
@@ -130,7 +130,7 @@ class Mitigation(BaseModel):
     id: str
     numericId: int
     status: MitigationStatus = MitigationStatus.IDENTIFIED
-    content: str
+    content: str = Field(max_length=1000)
     displayOrder: int
     metadata: List[MetadataItem] = []
     

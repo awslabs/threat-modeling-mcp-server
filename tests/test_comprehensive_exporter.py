@@ -62,9 +62,22 @@ class TestExportFilenames:
 
         assert not (export_dir / "my_model.json").exists()
 
-    def test_exports_only_the_two_expected_files(self, tmp_path, export_dir):
-        """Test that exactly the .tc.json and .md files are written."""
+    def test_extended_export_writes_tc_md_and_sidecar(self, tmp_path, export_dir):
+        """Extended export writes .tc.json, .md, and the .extended.json sidecar."""
         export_threat_model_files(str(tmp_path / "my_model"))
+
+        assert sorted(p.name for p in export_dir.iterdir()) == [
+            "my_model.extended.json",
+            "my_model.md",
+            "my_model.tc.json",
+        ]
+
+    def test_standard_export_writes_only_tc_and_md(self, tmp_path, export_dir):
+        """Standard export (no extended data) writes only .tc.json and .md."""
+        export_threat_model_files(
+            str(tmp_path / "my_model"),
+            include_extended_data=False,
+        )
 
         assert sorted(p.name for p in export_dir.iterdir()) == [
             "my_model.md",
@@ -117,11 +130,13 @@ class TestExportContent:
 
         export_threat_model_files(str(tmp_path / "my_model"))
 
-        with open(export_dir / "my_model.tc.json", encoding="utf-8") as f:
-            data = json.load(f)
+        # phaseProgress is extended taxonomy, so it lives in the sidecar file,
+        # not in the strict-schema .tc.json.
+        with open(export_dir / "my_model.extended.json", encoding="utf-8") as f:
+            extended = json.load(f)
         markdown = (export_dir / "my_model.md").read_text(encoding="utf-8")
 
-        assert data["phaseProgress"]["phase_completion"]["9"] == 1.0
+        assert extended["phaseProgress"]["phase_completion"]["9"] == 1.0
         assert orchestrator.phase_completion[9] == 1.0
         assert "| 9 | Output Generation and Documentation | 100% ✅ |" in markdown
 

@@ -2,6 +2,7 @@
 
 import json
 import os
+import uuid
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 from loguru import logger
@@ -14,6 +15,17 @@ from threat_modeling_mcp_server.utils.state_collector import (
     ThreatModelState,
 )
 from threat_modeling_mcp_server.utils.file_utils import normalize_output_path
+from threat_modeling_mcp_server.utils.text_limits import (
+    FREE_TEXT_SMALL_MAX_LENGTH,
+    SINGLE_FIELD_MAX_LENGTH,
+    STATEMENT_MAX_LENGTH,
+    truncate_field as _truncate,
+    truncate_tags,
+)
+from threat_modeling_mcp_server.utils.tc_schema_check import (
+    ThreatComposerSchemaError,
+    validate_threat_composer_payload,
+)
 
 
 last_successful_export_fingerprint: Optional[str] = None
@@ -98,7 +110,7 @@ def convert_assumptions_to_threat_composer_format(assumptions: Dict[str, Any]) -
         assumption_dict = {
             "id": assumption.id,
             "numericId": int(assumption.id.replace("A", "")) if assumption.id.startswith("A") else len(result) + 1,
-            "content": assumption.description,
+            "content": _truncate(assumption.description, FREE_TEXT_SMALL_MAX_LENGTH),
             "displayOrder": int(assumption.id.replace("A", "")) if assumption.id.startswith("A") else len(result) + 1,
             "metadata": []  # Keep metadata empty for Threat Composer compatibility
         }
@@ -107,27 +119,40 @@ def convert_assumptions_to_threat_composer_format(assumptions: Dict[str, Any]) -
     return result
 
 
-def _truncate(value: str, max_length: int) -> str:
-    """Truncate a string to max_length, preserving whole words where possible."""
-    if not value or len(value) <= max_length:
-        return value
-    # Try to break at last space before the limit
-    truncated = value[:max_length]
-    last_space = truncated.rfind(' ')
-    if last_space > max_length * 0.6:
-        return truncated[:last_space]
-    return truncated
+# Namespace used to stabilise the short-id -> UUID mapping across exports.
+_ID_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "threat-modeling-mcp-server/ids")
 
 
-def convert_threats_to_threat_composer_format(threats: Dict[str, Any]) -> List[Dict[str, Any]]:
+def build_id_map(*stores: Dict[str, Any]) -> Dict[str, str]:
+    """Map internal short ids (T001, M001, ...) to Threat Composer UUIDs.
+
+    Threat Composer's schema requires ``id`` values (and the ids referenced by
+    ``mitigationLinks``) to be UUID strings of at least 36 characters. The
+    server issues compact ids like ``T001``/``M001`` instead, so a file that
+    exports them verbatim is rejected on import. The mapping is deterministic
+    (uuid5) so re-exporting the same model yields stable ids.
+    """
+    id_map: Dict[str, str] = {}
+    for store in stores:
+        for short_id in store:
+            if short_id not in id_map:
+                id_map[short_id] = str(uuid.uuid5(_ID_NAMESPACE, str(short_id)))
+    return id_map
+
+
+def convert_threats_to_threat_composer_format(
+    threats: Dict[str, Any], id_map: Optional[Dict[str, str]] = None
+) -> List[Dict[str, Any]]:
     """Convert threats to Threat Composer format.
 
     Args:
         threats: Dictionary of threat objects
+        id_map: Optional short-id -> UUID map; ids are rewritten when provided
 
     Returns:
         List of threats in Threat Composer format
     """
+    id_map = id_map or {}
     result = []
 
     for threat in threats.values():
@@ -135,18 +160,18 @@ def convert_threats_to_threat_composer_format(threats: Dict[str, Any]) -> List[D
         threat_status = threat.status.value if threat.status else "threatIdentified"
 
         # Enforce Threat Composer schema maxLength constraints
-        threat_source = _truncate(threat.threatSource, 200)
-        prerequisites = _truncate(threat.prerequisites, 200)
-        threat_action = _truncate(threat.threatAction, 200)
-        threat_impact = _truncate(threat.threatImpact, 200)
-        statement = _truncate(threat.statement, 1400)
-        impacted_goal = [_truncate(g, 200) for g in (threat.impactedGoal or [])]
-        impacted_assets = [_truncate(a, 200) for a in (threat.impactedAssets or [])]
-        tags = [_truncate(t, 30) for t in (threat.tags or [])]
+        threat_source = _truncate(threat.threatSource, SINGLE_FIELD_MAX_LENGTH)
+        prerequisites = _truncate(threat.prerequisites, SINGLE_FIELD_MAX_LENGTH)
+        threat_action = _truncate(threat.threatAction, SINGLE_FIELD_MAX_LENGTH)
+        threat_impact = _truncate(threat.threatImpact, SINGLE_FIELD_MAX_LENGTH)
+        statement = _truncate(threat.statement, STATEMENT_MAX_LENGTH)
+        impacted_goal = [_truncate(g, SINGLE_FIELD_MAX_LENGTH) for g in (threat.impactedGoal or [])]
+        impacted_assets = [_truncate(a, SINGLE_FIELD_MAX_LENGTH) for a in (threat.impactedAssets or [])]
+        tags = truncate_tags(threat.tags)
 
         # Use only fields that are compatible with Threat Composer
         threat_dict = {
-            "id": threat.id,
+            "id": id_map.get(threat.id, threat.id),
             "numericId": threat.numericId,
             "threatSource": threat_source,
             "prerequisites": prerequisites,
@@ -166,15 +191,19 @@ def convert_threats_to_threat_composer_format(threats: Dict[str, Any]) -> List[D
     return result
 
 
-def convert_mitigations_to_threat_composer_format(mitigations: Dict[str, Any]) -> List[Dict[str, Any]]:
+def convert_mitigations_to_threat_composer_format(
+    mitigations: Dict[str, Any], id_map: Optional[Dict[str, str]] = None
+) -> List[Dict[str, Any]]:
     """Convert mitigations to Threat Composer format.
 
     Args:
         mitigations: Dictionary of mitigation objects
+        id_map: Optional short-id -> UUID map; ids are rewritten when provided
 
     Returns:
         List of mitigations in Threat Composer format
     """
+    id_map = id_map or {}
     result = []
 
     for mitigation in mitigations.values():
@@ -183,10 +212,10 @@ def convert_mitigations_to_threat_composer_format(mitigations: Dict[str, Any]) -
 
         # Use only fields that are compatible with Threat Composer
         mitigation_dict = {
-            "id": mitigation.id,
+            "id": id_map.get(mitigation.id, mitigation.id),
             "numericId": mitigation.numericId,
             "status": mitigation_status,
-            "content": mitigation.content,
+            "content": _truncate(mitigation.content, FREE_TEXT_SMALL_MAX_LENGTH),
             "displayOrder": mitigation.displayOrder,
             "metadata": []  # Keep metadata empty for Threat Composer compatibility
         }
@@ -440,7 +469,21 @@ def export_threat_model_files(
     # Export JSON format
     json_success = False
     json_size = 0
+    json_error = None
     try:
+        # Threat Composer requires UUID ids. Build a stable short-id -> UUID
+        # map covering threats and mitigations, and rewrite ids and the link
+        # references consistently so mitigationLinks still resolve.
+        id_map = build_id_map(state.threats, state.mitigations)
+
+        def _remap_link(link) -> Dict[str, Any]:
+            data = link.model_dump()
+            if "mitigationId" in data:
+                data["mitigationId"] = id_map.get(data["mitigationId"], data["mitigationId"])
+            if "linkedId" in data:
+                data["linkedId"] = id_map.get(data["linkedId"], data["linkedId"])
+            return data
+
         # Create comprehensive threat model with ONLY standard Threat Composer fields
         threat_model_data = {
             "schema": 1,
@@ -455,15 +498,32 @@ def export_threat_model_files(
                 "description": ""
             },
             "assumptions": convert_assumptions_to_threat_composer_format(state.assumptions),
-            "mitigations": convert_mitigations_to_threat_composer_format(state.mitigations),
+            "mitigations": convert_mitigations_to_threat_composer_format(state.mitigations, id_map),
             "assumptionLinks": [],
-            "mitigationLinks": [link.dict() for link in state.mitigation_links],
-            "threats": convert_threats_to_threat_composer_format(state.threats)
+            "mitigationLinks": [_remap_link(link) for link in state.mitigation_links],
+            "threats": convert_threats_to_threat_composer_format(state.threats, id_map)
         }
 
-        if include_extended_data:
-            threat_model_data.update(build_extended_export_data(state))
+        # Belt-and-suspenders: re-check the assembled payload against the
+        # Threat Composer field limits before writing. Every field is already
+        # clamped above, so this should never fail; if it does, a regression
+        # has slipped a schema-violating value into the export. We fail the
+        # JSON export loudly rather than write a file that Threat Composer will
+        # reject on import and report as a success.
+        schema_errors = validate_threat_composer_payload(threat_model_data)
+        if schema_errors:
+            raise ThreatComposerSchemaError(
+                "Exported Threat Composer payload violates the schema: "
+                + "; ".join(schema_errors)
+            )
 
+        # The .tc.json file must satisfy the Threat Composer schema, whose
+        # top-level object is `additionalProperties: false` -- it rejects ANY
+        # key outside its fixed set (schema, applicationInfo, architecture,
+        # dataflow, assumptions, mitigations, assumptionLinks, mitigationLinks,
+        # threats, brainstorm). So extended taxonomy cannot live in this file,
+        # not even under a namespaced key. When requested, it is written to a
+        # separate sidecar file instead, keeping the .tc.json importable.
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(threat_model_data, f, indent=2, ensure_ascii=False)
 
@@ -471,8 +531,18 @@ def export_threat_model_files(
         json_success = True
         logger.info(f"Successfully exported JSON threat model to {json_path}")
 
+        if include_extended_data:
+            extended_path = os.path.join(threatmodel_dir, f"{base_filename}.extended.json")
+            with open(extended_path, "w", encoding="utf-8") as f:
+                json.dump(build_extended_export_data(state), f, indent=2, ensure_ascii=False)
+            logger.info(f"Successfully exported extended data to {extended_path}")
+
+    except ThreatComposerSchemaError as e:
+        json_error = str(e)
+        logger.error(f"Failed to export JSON threat model: {json_error}")
     except Exception as e:
-        logger.error(f"Failed to export JSON threat model: {str(e)}")
+        json_error = str(e)
+        logger.error(f"Failed to export JSON threat model: {json_error}")
 
     # Export Markdown format
     markdown_success = False
@@ -535,15 +605,7 @@ def export_threat_model_files(
 
 ## Exported Files"""
 
-    json_format_label = (
-        "Threat Composer JSON plus extended taxonomy keys "
-        "(softwareProfile, dataAssetProfiles, userPersonas, "
-        "nonFunctionalRequirements, residualRiskAssessments, businessContext, "
-        "phaseProgress). Threat "
-        "Composer ignores unknown keys, so the file still imports."
-        if include_extended_data
-        else "Threat Composer JSON (standard fields only)"
-    )
+    json_format_label = "Threat Composer JSON (standard schema fields only)"
 
     if json_success:
         summary += f"""
@@ -554,6 +616,12 @@ def export_threat_model_files(
 - **Schema Version**: 1
 - **File Size**: {json_size} bytes
 - **Status**: ✅ Successfully exported"""
+    else:
+        summary += f"""
+
+### JSON Export
+- **Status**: ❌ Not exported
+- **Reason**: {json_error or 'unknown error'}"""
 
     if markdown_success:
         summary += f"""
@@ -565,16 +633,16 @@ def export_threat_model_files(
 - **Status**: ✅ Successfully exported"""
 
     if json_success:
+        summary += (
+            "\n\nThe .tc.json file contains only standard Threat Composer schema "
+            "fields and imports directly into AWS Threat Composer."
+        )
         if include_extended_data:
             summary += (
-                "\n\nThe JSON file imports into AWS Threat Composer, which ignores the "
-                "extended taxonomy keys. Pass include_extended_data=False for a file "
-                "containing standard schema fields only."
-            )
-        else:
-            summary += (
-                "\n\nThe JSON file is fully compatible with AWS Threat Composer and "
-                "contains only standard schema fields."
+                " Extended taxonomy (business context, architecture, threat actors, "
+                "trust boundaries, asset flows, residual risk, phase progress) is "
+                "written to a separate <name>.extended.json sidecar, since Threat "
+                "Composer's schema rejects unknown keys."
             )
 
     if markdown_success:

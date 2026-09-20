@@ -16,6 +16,14 @@ from threat_modeling_mcp_server.validation.enum_validator import (
     validate_enum_with_enhanced_error,
 )
 from threat_modeling_mcp_server.utils.id_utils import next_id, reset_id_counters
+from threat_modeling_mcp_server.utils.text_limits import (
+    FREE_TEXT_SMALL_MAX_LENGTH,
+    SINGLE_FIELD_MAX_LENGTH,
+    STATEMENT_MAX_LENGTH,
+    truncate_field as _truncate_field,
+    truncate_tags as _truncate_tags,
+)
+from threat_modeling_mcp_server.utils.statement import compose_statement
 
 
 # Global dictionaries to store threats and mitigations
@@ -29,19 +37,9 @@ threat_counter = 1
 mitigation_counter = 1
 
 
-THREAT_COMPOSER_MAX_LENGTH = 200
-STATEMENT_MAX_LENGTH = 1400
-
-
-def _truncate_field(value: str, max_length: int = THREAT_COMPOSER_MAX_LENGTH) -> str:
-    """Truncate a string to max_length for Threat Composer schema compliance."""
-    if not value or len(value) <= max_length:
-        return value
-    truncated = value[:max_length]
-    last_space = truncated.rfind(' ')
-    if last_space > max_length * 0.6:
-        return truncated[:last_space]
-    return truncated
+# Kept for backwards compatibility with earlier imports; the canonical limit
+# now lives in utils.text_limits.SINGLE_FIELD_MAX_LENGTH.
+THREAT_COMPOSER_MAX_LENGTH = SINGLE_FIELD_MAX_LENGTH
 
 
 def _validated_update(model, updates: Dict[str, Any]):
@@ -167,8 +165,11 @@ async def add_threat_impl(
     # Generate ID
     threat_id = next_id(threats, "T")
     
-    # Create statement from components
-    statement = f"A {threat_source} {prerequisites} can {threat_action}, which leads to {threat_impact}"
+    # Create statement from components (adds the article only when the source
+    # does not already start with one, avoiding a doubled "A A ...").
+    statement = compose_statement(
+        threat_source, prerequisites, threat_action, threat_impact
+    )
     statement = _truncate_field(statement, STATEMENT_MAX_LENGTH)
     
     # Create threat
@@ -184,9 +185,9 @@ async def add_threat_impl(
         category=category,
         severity=severity,
         likelihood=likelihood,
-        impactedAssets=affected_assets or [],
+        impactedAssets=[_truncate_field(a) for a in (affected_assets or [])],
         affected_components=affected_components or [],
-        tags=tags or []
+        tags=_truncate_tags(tags)
     )
     
     # Add to dictionary
@@ -237,10 +238,12 @@ async def update_threat_impl(
         "threatSource", "prerequisites", "threatAction", "threatImpact",
     }:
         updates["statement"] = _truncate_field(
-            f"A {updates.get('threatSource', threat.threatSource)} "
-            f"{updates.get('prerequisites', threat.prerequisites)} can "
-            f"{updates.get('threatAction', threat.threatAction)}, which leads "
-            f"to {updates.get('threatImpact', threat.threatImpact)}",
+            compose_statement(
+                updates.get("threatSource", threat.threatSource),
+                updates.get("prerequisites", threat.prerequisites),
+                updates.get("threatAction", threat.threatAction),
+                updates.get("threatImpact", threat.threatImpact),
+            ),
             STATEMENT_MAX_LENGTH
         )
     
@@ -260,10 +263,10 @@ async def update_threat_impl(
         updates["affected_components"] = affected_components
     
     if affected_assets is not None:
-        updates["impactedAssets"] = affected_assets
+        updates["impactedAssets"] = [_truncate_field(a) for a in affected_assets]
     
     if tags is not None:
-        updates["tags"] = tags
+        updates["tags"] = _truncate_tags(tags)
 
     threats[id] = _validated_update(threat, updates)
     
@@ -576,6 +579,9 @@ async def add_mitigation_impl(
     
     logger.debug(f'Adding mitigation: {content}')
     
+    # Enforce Threat Composer's free-text-small limit on mitigation content.
+    content = _truncate_field(content, FREE_TEXT_SMALL_MAX_LENGTH)
+    
     # Generate ID
     mitigation_id = next_id(mitigations, "M")
     
@@ -757,7 +763,7 @@ async def update_mitigation_impl(
     updates: Dict[str, Any] = {}
 
     if content is not None:
-        updates["content"] = content
+        updates["content"] = _truncate_field(content, FREE_TEXT_SMALL_MAX_LENGTH)
     
     if type is not None:
         updates["type"] = type

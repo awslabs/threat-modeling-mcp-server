@@ -474,7 +474,7 @@ class TestOutputRendering:
         summary = await bctx.get_business_context_impl(_Ctx())
         assert "Multiple / other" in summary
 
-    def test_export_summary_does_not_claim_standard_only_when_extended(
+    def test_export_summary_describes_sidecar_when_extended(
         self, tmp_path, monkeypatch
     ):
         from threat_modeling_mcp_server.utils.comprehensive_exporter import (
@@ -485,12 +485,16 @@ class TestOutputRendering:
         # directory. Never delete the repository's .threatmodel directory.
         monkeypatch.chdir(tmp_path)
 
+        # With extended data, the .tc.json is still standard-only (extended
+        # taxonomy goes to the sidecar), and the summary must say so.
         with_extended = export_threat_model_files("claim_test", True)
-        assert "contains only standard schema fields" not in with_extended
-        assert "extended taxonomy keys" in with_extended
+        assert "extended.json sidecar" in with_extended
+        assert "only standard Threat Composer schema fields" in with_extended
 
+        # Standard-only export mentions no sidecar.
         standard_only = export_threat_model_files("claim_test_std", False)
-        assert "contains only standard schema fields" in standard_only
+        assert "only standard Threat Composer schema fields" in standard_only
+        assert "sidecar" not in standard_only
 
 
 class TestMarkdownExportIsComplete:

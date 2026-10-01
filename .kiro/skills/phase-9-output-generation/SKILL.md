@@ -12,10 +12,13 @@ Generate final deliverables: Threat Composer-compatible JSON export and human-re
 
 ### export_threat_model
 Exports the current model and includes a state summary in the response.
+- First select the modeling context with
+  `manage_workflow(action="set_project", directory=...)`
 - Omit `output_path` to use a timestamped filename
-- Pass `output_path="my_model.json"` to choose a base path and filename
+- Pass `output_path="my_model.json"` to choose the base filename
 - Generates BOTH `.tc.json` and `.md` files
-- Saves both files to the adjacent `.threatmodel/` directory
+- Creates and saves both files under `<selected-project>/.threatmodel/`
+- Directory components in `output_path` cannot redirect either artifact
 - JSON is Threat Composer compatible (schema version 1)
 
 The comprehensive export includes current threat and mitigation statuses.

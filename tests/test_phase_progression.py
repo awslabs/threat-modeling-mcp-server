@@ -383,7 +383,7 @@ class TestRelationshipCompletionCriteria:
         orch.detect_phase_completion()
         assert orch.phase_completion[9] == 0.0
 
-        export_threat_model_files(str(tmp_path / "model"))
+        export_threat_model_files("model", str(tmp_path))
         orch.detect_phase_completion()
         assert orch.phase_completion[9] == 1.0
 
@@ -402,10 +402,10 @@ class TestRelationshipCompletionCriteria:
 class TestOptionalPhase75:
     """Phase 7.5 must not deadlock when there is no code to validate."""
 
-    def test_counts_as_complete_when_not_applicable(self, tmp_path, monkeypatch):
+    def test_counts_as_complete_when_not_applicable(self, tmp_path):
         import threat_modeling_mcp_server.tools.step_orchestrator as orch
 
-        monkeypatch.chdir(tmp_path)
+        orch.set_project_directory(str(tmp_path))
         orch.detect_phase_completion()
         assert orch.phase_completion[7.5] == 1.0
 
@@ -413,7 +413,7 @@ class TestOptionalPhase75:
     async def test_advance_skips_75_when_no_code(self, tmp_path, monkeypatch):
         import threat_modeling_mcp_server.tools.step_orchestrator as orch
 
-        monkeypatch.chdir(tmp_path)
+        orch.set_project_directory(str(tmp_path))
         monkeypatch.setattr(orch, "detect_phase_completion", lambda: None)
         for phase in orch.PHASES:
             orch.phase_completion[phase] = 1.0
@@ -459,11 +459,25 @@ class TestProjectDirectoryDrivesPhase75:
         assert orch.phase_7_5_applicable(str(with_code)) is True
         assert orch.phase_7_5_applicable() is False
 
-    def test_empty_directory_argument_falls_back_to_cwd(self):
+    def test_empty_directory_argument_does_not_select_cwd(self, monkeypatch):
         import threat_modeling_mcp_server.tools.step_orchestrator as orch
 
-        assert "'.'" in orch.set_project_directory("")
-        assert orch.project_directory == "."
+        monkeypatch.setattr(orch, "project_directory", None)
+        with pytest.raises(ValueError, match="explicitly selected"):
+            orch.set_project_directory("")
+        assert orch.project_directory is None
+
+    def test_relative_directory_is_resolved_when_selected(
+        self, tmp_path, monkeypatch,
+    ):
+        import threat_modeling_mcp_server.tools.step_orchestrator as orch
+
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "project").mkdir()
+
+        orch.set_project_directory("project")
+
+        assert orch.project_directory == str((tmp_path / "project").resolve())
 
 
 class TestDetectionFailureBlocksAdvancement:

@@ -4,6 +4,7 @@ This module provides tools for orchestrating the steps of the threat modeling pr
 including detailed guidance for each phase and automated execution of certain steps.
 """
 
+from pathlib import Path
 from typing import Any, Dict, Literal, Optional
 from loguru import logger
 from mcp.server.fastmcp import Context
@@ -59,14 +60,14 @@ current_phase = 1
 # must refuse to act rather than trusting it.
 last_detection_error: Optional[str] = None
 
-# Directory searched when deciding whether phase 7.5 applies. Defaults to the
-# server's working directory; set_project_directory() lets a caller point this at
-# the project under review, which need not be the server's CWD.
-project_directory = "."
+# Directory searched when deciding whether phase 7.5 applies and the
+# authoritative context for exports. It remains unselected until the caller
+# explicitly records the project being threat modeled.
+project_directory: Optional[str] = None
 
 
 def set_project_directory(directory: str) -> str:
-    """Record the directory that holds the project under review.
+    """Record the absolute directory that holds the project under review.
 
     Args:
         directory: Path to the project being threat modeled
@@ -76,7 +77,10 @@ def set_project_directory(directory: str) -> str:
     """
     global project_directory
 
-    project_directory = directory or "."
+    if not directory:
+        raise ValueError("Project directory must be explicitly selected.")
+
+    project_directory = str(Path(directory).expanduser().resolve())
     applicable = phase_7_5_applicable()
     return (
         f"Project directory set to '{project_directory}'. Code "
@@ -93,15 +97,19 @@ def phase_7_5_applicable(directory: Optional[str] = None) -> bool:
     required would deadlock the workflow.
 
     Args:
-        directory: Directory to search. Defaults to the recorded project
-            directory, which is the server's working directory unless
-            set_project_directory() was called.
+        directory: Directory to search. Defaults to the explicitly selected
+            project directory. If neither is set, code validation does not
+            apply.
 
     Returns:
         True if code was detected
     """
+    selected_directory = directory if directory is not None else project_directory
+    if selected_directory is None:
+        return False
+
     try:
-        return has_code_files(directory or project_directory)
+        return has_code_files(selected_directory)
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning(f"Could not determine whether phase 7.5 applies: {exc}")
         return False
@@ -124,7 +132,10 @@ def detect_phase_completion() -> None:
         readiness = state["phase_readiness"]
         phase_7_5_complete = (
             state.get('code_validation', {}).get('is_complete', False)
-            or not phase_7_5_applicable()
+            or (
+                project_directory is not None
+                and not phase_7_5_applicable()
+            )
         )
         computed = {
             phase: readiness[str(phase)]["is_complete"]
@@ -667,7 +678,9 @@ Generate final documentation and outputs for integration with development proces
 
 ## Steps
 1. **Export Comprehensive Threat Model**
-   - Use `export_threat_model(output_path="threat_model.json")` to choose a filename, or omit `output_path` for a timestamped name
+   - First select the modeling context with `manage_workflow(action="set_project", directory=...)`
+   - Use `export_threat_model(output_path="threat_model.json")` to choose a base filename, or omit `output_path` for a timestamped name
+   - Both artifacts are always created under the selected project's `.threatmodel` directory; directory components in `output_path` cannot redirect them
    - Include all components, threats, mitigations, business context, assumptions, and phase progress
    - Include current threat and mitigation statuses, including updates made during code validation
    - Compatible with AWS Threat Composer and includes extended data
@@ -729,8 +742,12 @@ async def get_phase_guidance_impl(
     if requested_phase != 7:
         return guidance
 
-    search_directory = directory or project_directory
-    code_detected = await detect_code_in_directory(search_directory)
+    search_directory = directory if directory is not None else project_directory
+    code_detected = (
+        await detect_code_in_directory(search_directory)
+        if search_directory is not None
+        else False
+    )
     logger.info(
         f"Code detected in directory '{search_directory}': {code_detected}"
     )
@@ -772,6 +789,12 @@ async def export_threat_model_impl(
     logger.info("Exporting threat model")
 
     try:
+        if project_directory is None:
+            raise ValueError(
+                "No project directory is selected. Call "
+                'manage_workflow(action="set_project", directory=...) before export.'
+            )
+
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         requested_path = (
             output_path
@@ -779,6 +802,7 @@ async def export_threat_model_impl(
         )
         export_result = export_threat_model_files(
             requested_path,
+            project_directory,
             include_extended_data=include_extended_data,
         )
         state_summary = get_state_summary()
@@ -805,8 +829,7 @@ async def export_threat_model_impl(
 - **Phase**: {state_summary['progress']['current_phase']} - {state_summary['progress']['current_phase_name']}
 - **Overall Completion**: {state_summary['progress']['overall_completion']:.1%}
 
-The JSON and Markdown files were written to the `.threatmodel` directory
-adjacent to the requested output path.
+Both files were written under the selected project's `.threatmodel` directory.
 """
         return report.strip()
     except Exception as exc:
@@ -962,9 +985,15 @@ async def manage_workflow_impl(
     if action == "describe":
         return workflow_guide()
     if action == "plan":
+        search_directory = directory if directory is not None else project_directory
+        if search_directory is None:
+            return (
+                "❌ action='plan' requires directory or a project selected with "
+                "action='set_project'."
+            )
         return await generate_threat_modeling_plan(
             ctx,
-            directory or project_directory,
+            search_directory,
             True if auto_validate_code is None else auto_validate_code,
         )
     if action == "guidance":
@@ -1028,7 +1057,9 @@ def register_tools(mcp):
         output_path: Optional[str] = Field(
             default=None,
             description=(
-                "Requested output path; omit for a timestamped filename"
+                "Optional base filename; directory components are ignored. "
+                "Omit for a timestamped filename in the selected project's "
+                ".threatmodel directory."
             ),
         ),
         include_extended_data: bool = Field(

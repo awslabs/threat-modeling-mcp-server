@@ -475,21 +475,21 @@ class TestOutputRendering:
         assert "Multiple / other" in summary
 
     def test_export_summary_does_not_claim_standard_only_when_extended(
-        self, tmp_path, monkeypatch
+        self, tmp_path
     ):
         from threat_modeling_mcp_server.utils.comprehensive_exporter import (
             export_threat_model_files,
         )
 
-        # The exporter writes into ./.threatmodel, so run in a temp working
-        # directory. Never delete the repository's .threatmodel directory.
-        monkeypatch.chdir(tmp_path)
-
-        with_extended = export_threat_model_files("claim_test", True)
+        with_extended = export_threat_model_files(
+            "claim_test", str(tmp_path), True,
+        )
         assert "contains only standard schema fields" not in with_extended
         assert "extended taxonomy keys" in with_extended
 
-        standard_only = export_threat_model_files("claim_test_std", False)
+        standard_only = export_threat_model_files(
+            "claim_test_std", str(tmp_path), False,
+        )
         assert "contains only standard schema fields" in standard_only
 
 

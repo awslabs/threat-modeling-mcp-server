@@ -648,7 +648,10 @@ needs to be inspected outside the system-context workflow.
 - Review export options and formats
 
 #### Step 9.2: Export Comprehensive Threat Model
-**Tool:** `export_threat_model(output_path="threat_model.json")`
+**Tools:** `manage_workflow(action="set_project", directory=...)`, then `export_threat_model(output_path="threat_model.json")`
+- Select the directory being threat modeled before exporting
+- Always create both artifacts under `<selected-project>/.threatmodel/`
+- Treat `output_path` only as a base-filename selector; directory components cannot redirect output
 - Export complete threat model with all global variables to JSON format
 - Include all components, threats, mitigations, business context, assumptions, and phase progress
 - Include current threat and mitigation statuses, including updates from code validation

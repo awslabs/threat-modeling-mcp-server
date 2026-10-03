@@ -13,7 +13,7 @@ from threat_modeling_mcp_server.utils.state_collector import (
     split_reviewed,
     ThreatModelState,
 )
-from threat_modeling_mcp_server.utils.file_utils import normalize_output_path
+from threat_modeling_mcp_server.utils.file_utils import resolve_export_paths
 
 
 last_successful_export_fingerprint: Optional[str] = None
@@ -389,18 +389,23 @@ def build_extended_export_data(state) -> Dict[str, Any]:
 
 def export_threat_model_files(
     output_path: str,
+    project_directory: str,
     include_extended_data: bool = True,
 ) -> str:
-    """Export comprehensive threat model to both Threat Composer JSON and Markdown formats.
+    """Export the threat model to Threat Composer JSON and Markdown.
 
     Args:
-        output_path: Path to save the exported threat model (without extension)
+        output_path: Requested base filename; directory components are ignored
+        project_directory: Authoritative directory being threat modeled
         include_extended_data: Whether to include extended data beyond standard Threat Composer format
 
     Returns:
         Confirmation message with export details for both formats
     """
-    logger.info(f"Starting comprehensive threat model export to {output_path}")
+    logger.info(
+        f"Starting comprehensive threat model export for {project_directory} "
+        f"with filename {output_path}"
+    )
 
     # Update phase completion before collecting state
     try:
@@ -418,24 +423,10 @@ def export_threat_model_files(
     state.phase_completion = dict(state.phase_completion)
     state.phase_completion[9] = 1.0
 
-    # Normalize the output path to be in .threatmodel directory
-    normalized_path = normalize_output_path(output_path)
-
-    # Remove any existing extension to create base path
-    base_path = os.path.splitext(normalized_path)[0]
-    # Strip a trailing ".tc" so a caller-supplied ".tc.json" path does not
-    # produce ".tc.tc.json"
-    if base_path.endswith('.tc'):
-        base_path = base_path[:-len('.tc')]
-
-    # Create the .threatmodel directory if it doesn't exist
-    threatmodel_dir = os.path.join(os.path.dirname(base_path), '.threatmodel')
-    os.makedirs(threatmodel_dir, exist_ok=True)
-
-    # Create paths for both formats
-    base_filename = os.path.basename(base_path)
-    json_path = os.path.join(threatmodel_dir, f"{base_filename}.tc.json")
-    markdown_path = os.path.join(threatmodel_dir, f"{base_filename}.md")
+    json_path, markdown_path = resolve_export_paths(
+        project_directory,
+        output_path,
+    )
 
     # Export JSON format
     json_success = False

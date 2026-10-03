@@ -29,10 +29,12 @@ def phase_readiness(*complete_phases):
 
 @pytest.fixture(autouse=True)
 def reset_phase_completion():
-    """Reset phase completion before each test."""
+    """Reset phase completion and project selection before each test."""
+    original_project_directory = orchestrator.project_directory
     for phase in phase_completion:
         phase_completion[phase] = 0.0
     yield
+    orchestrator.project_directory = original_project_directory
     for phase in phase_completion:
         phase_completion[phase] = 0.0
 
@@ -173,6 +175,128 @@ class TestGetPhaseGuidanceTool:
 
         detect_code.assert_awaited_once_with("/override/project")
         assert 'manage_workflow(action="guidance", phase="8")' in guidance
+
+
+class TestExportPathResolution:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("requested_path", "base_filename", "include_extended_data"),
+        [
+            ("relative-model.json", "relative-model", True),
+            ("../escape.json", "escape", False),
+            ("/outside/absolute.tc.json", "absolute", True),
+            ("nested/report.md", "report", False),
+            (r"C:\outside\windows.json", "windows", True),
+        ],
+    )
+    async def test_all_export_paths_stay_in_selected_project(
+        self,
+        tmp_path,
+        monkeypatch,
+        empty_threat_model_state,
+        requested_path,
+        base_filename,
+        include_extended_data,
+    ):
+        server_cwd = tmp_path / "server-cwd"
+        project_directory = tmp_path / "project" / "subproject"
+        outside = tmp_path / "outside"
+        server_cwd.mkdir()
+        project_directory.mkdir(parents=True)
+        outside.mkdir()
+        monkeypatch.chdir(server_cwd)
+        orchestrator.set_project_directory(str(project_directory))
+
+        result = await orchestrator.export_threat_model_impl(
+            None,
+            requested_path,
+            include_extended_data=include_extended_data,
+        )
+
+        export_directory = project_directory / ".threatmodel"
+        json_path = export_directory / f"{base_filename}.tc.json"
+        markdown_path = export_directory / f"{base_filename}.md"
+        assert json_path.is_file()
+        assert markdown_path.is_file()
+        assert str(json_path.resolve()) in result
+        assert str(markdown_path.resolve()) in result
+        assert not list(project_directory.glob("*.json"))
+        assert not list(project_directory.glob("*.md"))
+        assert not (server_cwd / ".threatmodel").exists()
+        assert not list(outside.rglob("*.json"))
+        assert not list(outside.rglob("*.md"))
+
+    @pytest.mark.asyncio
+    async def test_omitted_path_uses_timestamped_name_in_selected_project(
+        self, tmp_path, monkeypatch, empty_threat_model_state,
+    ):
+        server_cwd = tmp_path / "server-cwd"
+        project_directory = tmp_path / "project"
+        server_cwd.mkdir()
+        project_directory.mkdir()
+        monkeypatch.chdir(server_cwd)
+        orchestrator.set_project_directory(str(project_directory))
+
+        result = await orchestrator.export_threat_model_impl(None)
+
+        export_directory = project_directory / ".threatmodel"
+        json_files = list(export_directory.glob(
+            "comprehensive_threat_model_*.tc.json"
+        ))
+        markdown_files = list(export_directory.glob(
+            "comprehensive_threat_model_*.md"
+        ))
+        assert len(json_files) == 1
+        assert len(markdown_files) == 1
+        assert json_files[0].name.removesuffix(".tc.json") == (
+            markdown_files[0].name.removesuffix(".md")
+        )
+        assert str(json_files[0].resolve()) in result
+        assert str(markdown_files[0].resolve()) in result
+        assert not (server_cwd / ".threatmodel").exists()
+
+    @pytest.mark.asyncio
+    async def test_export_requires_an_explicit_project_selection(
+        self, tmp_path, monkeypatch, empty_threat_model_state,
+    ):
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(orchestrator, "project_directory", None)
+
+        result = await orchestrator.export_threat_model_impl(None, "model.json")
+
+        assert "No project directory is selected" in result
+        assert not (tmp_path / ".threatmodel").exists()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("invalid_path", ["..", ".md", ".json", ".tc.json", "/"])
+    async def test_invalid_base_filename_is_rejected(
+        self, tmp_path, empty_threat_model_state, invalid_path,
+    ):
+        orchestrator.set_project_directory(str(tmp_path))
+
+        result = await orchestrator.export_threat_model_impl(None, invalid_path)
+
+        assert "valid" in result
+        assert "filename" in result
+        assert not (tmp_path / ".threatmodel").exists()
+
+    @pytest.mark.asyncio
+    async def test_escaping_threatmodel_symlink_is_rejected(
+        self, tmp_path, empty_threat_model_state,
+    ):
+        project_directory = tmp_path / "project"
+        outside = tmp_path / "outside"
+        project_directory.mkdir()
+        outside.mkdir()
+        (project_directory / ".threatmodel").symlink_to(
+            outside, target_is_directory=True,
+        )
+        orchestrator.set_project_directory(str(project_directory))
+
+        result = await orchestrator.export_threat_model_impl(None, "model.json")
+
+        assert "resolves outside the project directory" in result
+        assert not list(outside.iterdir())
 
 
 class TestGetWorkflowStatus:

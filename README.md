@@ -243,10 +243,14 @@ kiro-cli chat --agent threat-modeler
 
 ## Output File Management
 
-The export tool writes JSON and Markdown files to a `.threatmodel`
-directory next to the requested output path. The directory is created when an
-export runs. `export_threat_model()` uses the server's current working
-directory because it supplies a relative output filename.
+Before exporting, select the directory being threat modeled with
+`manage_workflow(action="set_project", directory=...)`. The export tool always
+creates `<selected-project>/.threatmodel/` and writes both the Threat Composer
+`.tc.json` file and Markdown report there. Omitting `output_path` uses a
+timestamped base filename. Supplying `output_path` selects only the base
+filename; absolute paths, parent traversal, and other directory components
+cannot redirect either artifact outside the selected project's `.threatmodel`
+directory.
 
 Validation and analysis tools generally return text through MCP rather than
 writing report files. The exported files are snapshots; the server does not

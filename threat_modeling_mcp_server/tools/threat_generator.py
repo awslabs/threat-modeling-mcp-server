@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import re
 from typing import Any, Dict, List, Optional, Tuple
 from loguru import logger
 from mcp.server.fastmcp import Context
@@ -29,19 +30,34 @@ threat_counter = 1
 mitigation_counter = 1
 
 
-THREAT_COMPOSER_MAX_LENGTH = 200
-STATEMENT_MAX_LENGTH = 1400
+# Exactly one leading whole-word "a"/"an", which the statement template
+# already supplies as "A".
+_LEADING_ARTICLE = re.compile(r"^\s*an?\s+", re.IGNORECASE)
 
 
-def _truncate_field(value: str, max_length: int = THREAT_COMPOSER_MAX_LENGTH) -> str:
-    """Truncate a string to max_length for Threat Composer schema compliance."""
-    if not value or len(value) <= max_length:
-        return value
-    truncated = value[:max_length]
-    last_space = truncated.rfind(' ')
-    if last_space > max_length * 0.6:
-        return truncated[:last_space]
-    return truncated
+def build_threat_statement(
+    threat_source: str,
+    prerequisites: str,
+    threat_action: str,
+    threat_impact: str,
+) -> Tuple[str, str]:
+    """Build the canonical threat statement used by both add and update.
+
+    Args:
+        threat_source: Noun phrase for the actor; one leading "a"/"an" is removed
+        prerequisites: Phrase continuing the source, e.g. "with valid credentials"
+        threat_action: Bare infinitive following "can"
+        threat_impact: Phrase following "which leads to"
+
+    Returns:
+        Tuple of (normalized threat source, statement)
+    """
+    normalized_source = _LEADING_ARTICLE.sub("", threat_source, count=1)
+    statement = (
+        f"A {normalized_source} {prerequisites} can {threat_action}, "
+        f"which leads to {threat_impact}"
+    )
+    return normalized_source, statement
 
 
 def _validated_update(model, updates: Dict[str, Any]):
@@ -156,20 +172,15 @@ async def add_threat_impl(
     """Add a new threat to the model."""
     global threat_counter
 
-    logger.debug(f'Adding threat: {threat_source} {threat_action}')
-    
-    # Enforce Threat Composer schema maxLength constraints
-    threat_source = _truncate_field(threat_source)
-    prerequisites = _truncate_field(prerequisites)
-    threat_action = _truncate_field(threat_action)
-    threat_impact = _truncate_field(threat_impact)
-    
+    logger.debug("Adding threat")
+
+    # Full text is stored; Threat Composer limits apply only at strict export.
+    threat_source, statement = build_threat_statement(
+        threat_source, prerequisites, threat_action, threat_impact
+    )
+
     # Generate ID
     threat_id = next_id(threats, "T")
-    
-    # Create statement from components
-    statement = f"A {threat_source} {prerequisites} can {threat_action}, which leads to {threat_impact}"
-    statement = _truncate_field(statement, STATEMENT_MAX_LENGTH)
     
     # Create threat
     threat = Threat(
@@ -222,26 +233,25 @@ async def update_threat_impl(
     updates: Dict[str, Any] = {}
 
     if threat_source is not None:
-        updates["threatSource"] = _truncate_field(threat_source)
+        updates["threatSource"] = threat_source
 
     if prerequisites is not None:
-        updates["prerequisites"] = _truncate_field(prerequisites)
+        updates["prerequisites"] = prerequisites
 
     if threat_action is not None:
-        updates["threatAction"] = _truncate_field(threat_action)
+        updates["threatAction"] = threat_action
 
     if threat_impact is not None:
-        updates["threatImpact"] = _truncate_field(threat_impact)
+        updates["threatImpact"] = threat_impact
 
     if updates.keys() & {
         "threatSource", "prerequisites", "threatAction", "threatImpact",
     }:
-        updates["statement"] = _truncate_field(
-            f"A {updates.get('threatSource', threat.threatSource)} "
-            f"{updates.get('prerequisites', threat.prerequisites)} can "
-            f"{updates.get('threatAction', threat.threatAction)}, which leads "
-            f"to {updates.get('threatImpact', threat.threatImpact)}",
-            STATEMENT_MAX_LENGTH
+        updates["threatSource"], updates["statement"] = build_threat_statement(
+            updates.get("threatSource", threat.threatSource),
+            updates.get("prerequisites", threat.prerequisites),
+            updates.get("threatAction", threat.threatAction),
+            updates.get("threatImpact", threat.threatImpact),
         )
     
     if category is not None:
@@ -574,7 +584,7 @@ async def add_mitigation_impl(
     """Add a new mitigation to the model."""
     global mitigation_counter
     
-    logger.debug(f'Adding mitigation: {content}')
+    logger.debug("Adding mitigation")
     
     # Generate ID
     mitigation_id = next_id(mitigations, "M")

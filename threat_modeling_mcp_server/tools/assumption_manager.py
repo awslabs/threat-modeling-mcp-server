@@ -31,7 +31,7 @@ async def add_assumption_impl(
     Returns:
         A confirmation message with the assumption ID
     """
-    logger.debug(f'Adding assumption: {description}')
+    logger.debug('Adding assumption')
     
     # Generate a simple ID based on the number of assumptions
     assumption_id = next_id(assumptions, "A")

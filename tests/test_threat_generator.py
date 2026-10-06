@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 import threat_modeling_mcp_server.tools.threat_generator as threat_generator_module
 from threat_modeling_mcp_server.tools.threat_generator import (
     add_threat_impl,
+    build_threat_statement,
     update_threat_impl,
     list_threats_impl,
     get_threat_impl,
@@ -55,6 +56,147 @@ def clear_global_state():
     mitigations.clear()
     threat_generator_module.mitigation_links = []
     residual_risk_assessments.clear()
+
+
+class TestThreatStatementBuilder:
+    """Add and update share one builder that handles a leading article."""
+
+    @pytest.mark.parametrize(
+        "source, expected",
+        [
+            ("An external attacker", "external attacker"),
+            ("a user", "user"),
+            ("AN admin", "admin"),
+            ("A an attacker", "an attacker"),
+            ("Anonymous user", "Anonymous user"),
+            ("API client", "API client"),
+            ("attacker", "attacker"),
+        ],
+    )
+    def test_removes_exactly_one_leading_article(self, source, expected):
+        normalized, statement = build_threat_statement(
+            source, "with valid credentials", "read sensitive files", "data disclosure"
+        )
+        assert normalized == expected
+        assert statement == (
+            f"A {expected} with valid credentials can read sensitive files, "
+            "which leads to data disclosure"
+        )
+
+    @pytest.mark.asyncio
+    async def test_add_does_not_double_the_article(self, mock_context):
+        result = await add_threat_impl(
+            ctx=mock_context,
+            threat_source="An external attacker",
+            prerequisites="with valid credentials",
+            threat_action="read sensitive files",
+            threat_impact="data disclosure",
+        )
+        threat = threats[result.split(": ")[1]]
+        assert threat.threatSource == "external attacker"
+        assert threat.statement == (
+            "A external attacker with valid credentials can read sensitive "
+            "files, which leads to data disclosure"
+        )
+        assert "A An" not in threat.statement
+
+    @pytest.mark.asyncio
+    async def test_add_and_update_produce_the_same_statement(self, mock_context):
+        first = (await add_threat_impl(
+            ctx=mock_context,
+            threat_source="A malicious insider",
+            prerequisites="with valid credentials",
+            threat_action="read sensitive files",
+            threat_impact="data disclosure",
+        )).split(": ")[1]
+        second = (await add_threat_impl(
+            ctx=mock_context,
+            threat_source="attacker",
+            prerequisites="with access",
+            threat_action="do something",
+            threat_impact="damage",
+        )).split(": ")[1]
+
+        await update_threat_impl(
+            ctx=mock_context,
+            id=second,
+            threat_source="A malicious insider",
+            prerequisites="with valid credentials",
+            threat_action="read sensitive files",
+            threat_impact="data disclosure",
+        )
+
+        assert threats[first].statement == threats[second].statement
+        assert threats[second].threatSource == "malicious insider"
+        assert "A A " not in threats[second].statement
+
+    @pytest.mark.asyncio
+    async def test_update_of_action_only_rebuilds_statement(self, mock_context):
+        threat_id = (await add_threat_impl(
+            ctx=mock_context,
+            threat_source="An insider",
+            prerequisites="with access",
+            threat_action="read files",
+            threat_impact="disclosure",
+        )).split(": ")[1]
+
+        await update_threat_impl(
+            ctx=mock_context, id=threat_id, threat_action="delete files",
+        )
+
+        assert threats[threat_id].threatSource == "insider"
+        assert threats[threat_id].statement == (
+            "A insider with access can delete files, which leads to disclosure"
+        )
+
+    @pytest.mark.asyncio
+    async def test_update_source_stores_normalized_source(self, mock_context):
+        threat_id = (await add_threat_impl(
+            ctx=mock_context,
+            threat_source="attacker",
+            prerequisites="with access",
+            threat_action="read files",
+            threat_impact="disclosure",
+        )).split(": ")[1]
+
+        await update_threat_impl(
+            ctx=mock_context, id=threat_id, threat_source="An insider",
+        )
+
+        assert threats[threat_id].threatSource == "insider"
+        assert threats[threat_id].statement.startswith("A insider with access")
+
+
+class TestThreatTextIsNotTruncated:
+    """Full text is stored; only the strict export applies limits."""
+
+    @pytest.mark.asyncio
+    async def test_add_and_update_keep_full_text(self, mock_context):
+        long_source = "s" * 300
+        long_action = "a" * 600
+        long_impact = "i" * 600
+        threat_id = (await add_threat_impl(
+            ctx=mock_context,
+            threat_source=long_source,
+            prerequisites="with access",
+            threat_action=long_action,
+            threat_impact=long_impact,
+        )).split(": ")[1]
+
+        threat = threats[threat_id]
+        assert threat.threatSource == long_source
+        assert threat.threatAction == long_action
+        assert len(threat.statement) > 1400
+
+        longer_prerequisites = "p" * 250
+        await update_threat_impl(
+            ctx=mock_context, id=threat_id, prerequisites=longer_prerequisites,
+        )
+        threat = threats[threat_id]
+        assert threat.prerequisites == longer_prerequisites
+        assert threat.threatSource == long_source
+        assert longer_prerequisites in threat.statement
+        assert threat.statement.endswith(long_impact)
 
 
 class TestAddThreat:

@@ -39,7 +39,8 @@ def validate_enum_with_enhanced_error(value, enum_class: Type[Enum], field_name:
         value_lower = value.lower().strip()
         for enum_value, enum_member in valid_values.items():
             if enum_value.lower() == value_lower:
-                logger.info(f"Enum value '{value}' matched to '{enum_member.value}' (case-insensitive) for {enum_class.__name__}")
+                # Log only the canonical member, never the caller-supplied text.
+                logger.info(f"Enum value matched to '{enum_member.value}' (case-insensitive) for {enum_class.__name__}")
                 return enum_member
 
     # Create enhanced error message with all valid options

@@ -1,7 +1,10 @@
 """Threat Model Planning functionality for the Threat Modeling MCP Server."""
 
+import asyncio
+import fnmatch
 import os
-import glob
+from dataclasses import dataclass
+from enum import Enum
 from typing import List, Optional
 from loguru import logger
 from mcp.server.fastmcp import Context
@@ -23,36 +26,127 @@ CODE_FILE_PATTERNS = [
 ]
 
 
+# Directories that hold VCS metadata, dependencies, virtual environments,
+# caches, IDE settings, or build output. They are pruned before descent so
+# vendored or generated files never count as project code.
+SKIP_DIRECTORY_NAMES = frozenset({
+    ".git", ".hg", ".svn", "node_modules", "venv", ".venv", "env",
+    "__pycache__", ".mypy_cache", ".pytest_cache", ".tox", ".ruff_cache",
+    "dist", "build", ".next", ".nuxt", "target", ".terraform", ".idea",
+    ".vscode",
+})
+
+
+class CodeApplicability(str, Enum):
+    """Outcome of scanning a directory for code."""
+
+    CODE_PRESENT = "CODE_PRESENT"
+    NO_CODE = "NO_CODE"
+    # The scan could not inspect everything, so absence of code is unproven.
+    UNKNOWN_PARTIAL = "UNKNOWN_PARTIAL"
+
+
+@dataclass(frozen=True)
+class CodeScanResult:
+    """Result of one code scan of a directory."""
+
+    directory: str
+    applicability: CodeApplicability
+    error_count: int = 0
+
+
+def scan_for_code(
+    directory: str,
+    file_patterns: Optional[List[str]] = None,
+) -> CodeScanResult:
+    """Scan a directory tree once for files matching any code pattern.
+
+    The walk prunes dependency, cache, build, and hidden directories before
+    descending, never follows directory symlinks, and stops at the first
+    match. Only an error-free walk of an existing directory with no match
+    reports ``NO_CODE``; anything incomplete reports ``UNKNOWN_PARTIAL``.
+
+    Args:
+        directory: Directory to scan
+        file_patterns: Optional filename patterns; defaults to CODE_FILE_PATTERNS
+
+    Returns:
+        The scan result
+    """
+    patterns = list(file_patterns or CODE_FILE_PATTERNS)
+    errors: List[OSError] = []
+
+    if not os.path.isdir(directory):
+        logger.debug("Code scan root is not a directory")
+        return CodeScanResult(directory, CodeApplicability.UNKNOWN_PARTIAL, 1)
+
+    for root, dirnames, filenames in os.walk(
+        directory, topdown=True, onerror=errors.append, followlinks=False
+    ):
+        # Prune in place so os.walk never descends into skipped directories.
+        dirnames[:] = [
+            name for name in dirnames
+            if name not in SKIP_DIRECTORY_NAMES
+            and not name.startswith(".")
+            and not os.path.islink(os.path.join(root, name))
+        ]
+        for filename in filenames:
+            if filename.startswith("."):
+                continue
+            if any(fnmatch.fnmatchcase(filename, pattern) for pattern in patterns):
+                logger.debug("Code scan result: CODE_PRESENT")
+                return CodeScanResult(
+                    directory, CodeApplicability.CODE_PRESENT, len(errors)
+                )
+
+    applicability = (
+        CodeApplicability.NO_CODE if not errors
+        else CodeApplicability.UNKNOWN_PARTIAL
+    )
+    logger.debug(
+        f"Code scan result: {applicability.value} ({len(errors)} error(s))"
+    )
+    return CodeScanResult(directory, applicability, len(errors))
+
+
 def has_code_files(directory: str = ".", file_patterns: Optional[List[str]] = None) -> bool:
-    """Synchronously detect whether code files are present in a directory.
+    """Synchronously detect whether code files may be present in a directory.
+
+    Fails closed: an incomplete scan counts as possibly containing code.
 
     Args:
         directory: Directory to check for code files
         file_patterns: Optional list of file patterns to look for
 
     Returns:
-        True if code files are detected, False otherwise
+        False only when a complete scan found no code files
     """
-    for pattern in file_patterns or CODE_FILE_PATTERNS:
-        if glob.glob(os.path.join(directory, "**", pattern), recursive=True):
-            logger.debug(f"Detected code files matching pattern {pattern}")
-            return True
+    return (
+        scan_for_code(directory, file_patterns).applicability
+        is not CodeApplicability.NO_CODE
+    )
 
-    logger.debug("No code files detected in the directory")
-    return False
+
+async def detect_code_scan(
+    directory: str,
+    file_patterns: Optional[List[str]] = None,
+) -> CodeScanResult:
+    """Run scan_for_code off the event-loop thread."""
+    return await asyncio.to_thread(scan_for_code, directory, file_patterns)
 
 
 async def detect_code_in_directory(directory: str, file_patterns: Optional[List[str]] = None) -> bool:
-    """Detect if code files are present in the specified directory.
+    """Detect if code files may be present, scanning off the event loop.
 
     Args:
         directory: Directory to check for code files
         file_patterns: Optional list of file patterns to look for
 
     Returns:
-        True if code files are detected, False otherwise
+        False only when a complete scan found no code files
     """
-    return has_code_files(directory, file_patterns)
+    result = await detect_code_scan(directory, file_patterns)
+    return result.applicability is not CodeApplicability.NO_CODE
 
 
 async def generate_threat_modeling_plan(ctx: Context, directory: str = ".", auto_validate_code: bool = True) -> str:
@@ -650,13 +744,12 @@ needs to be inspected outside the system-context workflow.
 #### Step 9.2: Export Comprehensive Threat Model
 **Tools:** `manage_workflow(action="set_project", directory=...)`, then `export_threat_model(output_path="threat_model.json")`
 - Select the directory being threat modeled before exporting
-- Always create both artifacts under `<selected-project>/.threatmodel/`
+- Always create every artifact under `<selected-project>/.threatmodel/`
 - Treat `output_path` only as a base-filename selector; directory components cannot redirect output
-- Export complete threat model with all global variables to JSON format
-- Include all components, threats, mitigations, business context, assumptions, and phase progress
+- Write strict Threat Composer JSON (`<base>.tc.json`, the only importable file) and a Markdown report (`<base>.md`)
+- By default also write a separate `<base>.extended.json` server-state snapshot with components, business context, profiles, and phase progress; it is NOT importable into Threat Composer (`include_extended_data=False` skips it)
 - Include current threat and mitigation statuses, including updates from code validation
-- Compatible with AWS Threat Composer and includes extended data
-- Phase 9 completes only after both files represent the current model
+- Phase 9 completes only after every requested file represents the current model
 
 #### Step 9.3: Generate Summary Reports
 **Tools:** `manage_workflow(action="progress")`, `manage_assumptions(action="list")`

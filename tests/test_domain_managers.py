@@ -136,6 +136,21 @@ async def test_describe_returns_section_specific_contracts():
 
 
 @pytest.mark.asyncio
+async def test_threat_describe_documents_statement_phrasing():
+    result = await call("manage_threats", action="describe", section="threats")
+
+    assert "without a leading article" in result
+    assert "with valid credentials" in result
+    assert "bare infinitive" in result
+    assert "read sensitive files" in result
+    assert (
+        "A malicious insider with valid credentials can read sensitive files, "
+        "which leads to disclosure of customer data"
+    ) in result
+    assert "truncated to their schema limits" not in result
+
+
+@pytest.mark.asyncio
 async def test_assumption_manager_supports_batch_and_crud():
     result = await call(
         "manage_assumptions",
@@ -705,7 +720,8 @@ async def test_threat_enum_errors_list_valid_options_without_partial_update():
 
     assert result.startswith("❌ threat failed:")
     assert "Valid options are" in result
-    assert threats.threats[threat_id].threatSource == "An attacker"
+    # The add normalized away the leading article; the failed update kept it.
+    assert threats.threats[threat_id].threatSource == "attacker"
     assert threats.threats[threat_id].severity.value == "High"
 
 

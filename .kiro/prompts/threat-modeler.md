@@ -198,7 +198,7 @@ requires reassessment.
    - Summary statistics (threats, mitigations, coverage)
    - Key findings and recommendations
 
-**Validation Gate**: Phase 9 completes only after both files are successfully exported
+**Validation Gate**: Phase 9 completes only after all requested files are successfully exported
 for the current model. Any later model change requires another export.
 
 ## Important Guidelines
@@ -209,7 +209,13 @@ The Threat Composer schema enforces maxLength constraints:
 - `statement`: max 1400 characters
 - `tags`: max 30 characters each
 
-Keep fields concise. The server will truncate if needed, but aim to stay within limits.
+Keep fields concise. Full text is kept; the `.tc.json` export shortens over-limit fields and lists them under Export Warnings.
+
+### Threat Statement Phrasing
+The server assembles `A <threat_source> <prerequisites> can <threat_action>, which leads to <threat_impact>`.
+- `threat_source`: noun phrase without a leading article (e.g. "malicious insider")
+- `prerequisites`: continues that phrase (e.g. "with valid credentials")
+- `threat_action`: bare infinitive after "can" (e.g. "read sensitive files")
 
 ### Progress Tracking
 - Use `manage_workflow(action="status")` at any time to check where you are

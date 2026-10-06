@@ -16,14 +16,18 @@ Exports the current model and includes a state summary in the response.
   `manage_workflow(action="set_project", directory=...)`
 - Omit `output_path` to use a timestamped filename
 - Pass `output_path="my_model.json"` to choose the base filename
-- Generates BOTH `.tc.json` and `.md` files
-- Creates and saves both files under `<selected-project>/.threatmodel/`
-- Directory components in `output_path` cannot redirect either artifact
-- JSON is Threat Composer compatible (schema version 1)
+- Generates `<base>.tc.json` and `<base>.md`, plus a separate
+  `<base>.extended.json` snapshot unless `include_extended_data=False`
+- Creates and saves every file under `<selected-project>/.threatmodel/`
+- Directory components in `output_path` cannot redirect any artifact
+- `.tc.json` is strict Threat Composer JSON (schema version 1) and the only
+  file to import; it never carries extra top-level keys
+- `.extended.json` is a full server-state snapshot (NOT importable into
+  Threat Composer) with internal ids, full text, residual-risk assessments,
+  profiles, and phase progress
 
 The comprehensive export includes current threat and mitigation statuses.
-Extended JSON and Markdown also include residual-risk assessments; the standard
-Threat Composer fields remain unchanged.
+Markdown and the extended snapshot also include residual-risk assessments.
 
 ### Progress Tools
 - `manage_workflow(action="progress")` -- Final progress summary with phase completion
@@ -51,7 +55,14 @@ Threat Composer fields remain unchanged.
 }
 ```
 
+Ids in `.tc.json` are deterministic UUIDs derived from the internal ids, and
+every `mitigationLinks` entry references exported entities.
+
 ### Threat Composer Field Constraints
+The stored model keeps full text. These limits apply only to the `.tc.json`
+copy; each shortened field is listed under "Export Warnings" in the tool
+response.
+
 | Field | Max Length |
 |---|---|
 | threatSource | 200 chars |
@@ -60,6 +71,7 @@ Threat Composer fields remain unchanged.
 | threatImpact | 200 chars |
 | statement | 1400 chars |
 | tags (each) | 30 chars |
+| mitigation / assumption content | 1000 chars |
 
 ### Threat Composer Status Values
 | Threats | Mitigations |
@@ -90,7 +102,7 @@ Contains:
 ## Importing to AWS Threat Composer
 1. Open AWS Threat Composer
 2. Click Import
-3. Select the `.tc.json` file from `.threatmodel/`
+3. Select the `.tc.json` file from `.threatmodel/` (never the `.extended.json` snapshot)
 4. All threats, mitigations, assumptions, and links will load
 
 ## Workflow

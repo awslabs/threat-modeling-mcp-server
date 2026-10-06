@@ -220,6 +220,14 @@ class TestExportPathResolution:
         assert markdown_path.is_file()
         assert str(json_path.resolve()) in result
         assert str(markdown_path.resolve()) in result
+        extended_path = export_directory / f"{base_filename}.extended.json"
+        assert extended_path.is_file() is include_extended_data
+        if include_extended_data:
+            assert str(extended_path.resolve()) in result
+        expected_files = {json_path.name, markdown_path.name}
+        if include_extended_data:
+            expected_files.add(extended_path.name)
+        assert {p.name for p in export_directory.iterdir()} == expected_files
         assert not list(project_directory.glob("*.json"))
         assert not list(project_directory.glob("*.md"))
         assert not (server_cwd / ".threatmodel").exists()
@@ -297,6 +305,34 @@ class TestExportPathResolution:
 
         assert "resolves outside the project directory" in result
         assert not list(outside.iterdir())
+
+    @pytest.mark.asyncio
+    async def test_failed_extended_snapshot_does_not_complete_phase_nine(
+        self, tmp_path, monkeypatch, empty_threat_model_state,
+    ):
+        import threat_modeling_mcp_server.utils.comprehensive_exporter as exporter
+
+        def broken_snapshot(state, filename):
+            raise RuntimeError("snapshot failed")
+
+        monkeypatch.setattr(exporter, "build_extended_snapshot_data", broken_snapshot)
+        orchestrator.set_project_directory(str(tmp_path))
+
+        result = await orchestrator.export_threat_model_impl(None, "model.json")
+
+        assert "Export incomplete; failed: Extended snapshot" in result
+        assert exporter.last_successful_export_fingerprint is None
+        assert orchestrator.phase_completion[9] == 0.0
+
+
+class TestPhaseNineGuidance:
+    def test_guidance_describes_strict_and_extended_artifacts(self):
+        guidance = orchestrator.build_phase_guidance(9)
+
+        assert "two-file" not in guidance
+        assert ".extended.json" in guidance
+        assert "NOT importable" in guidance
+        assert "Compatible with AWS Threat Composer and includes extended data" not in guidance
 
 
 class TestGetWorkflowStatus:

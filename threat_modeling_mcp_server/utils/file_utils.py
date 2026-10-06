@@ -8,19 +8,20 @@ from typing import Tuple, Union
 def resolve_export_paths(
     project_directory: Union[str, Path],
     output_path: Union[str, Path],
-) -> Tuple[str, str]:
-    """Resolve both export paths inside the selected project's .threatmodel.
+) -> Tuple[str, str, str]:
+    """Resolve every export path inside the selected project's .threatmodel.
 
     Caller-supplied directory components are intentionally discarded. The
-    requested path selects only the shared base filename for the JSON and
-    Markdown artifacts.
+    requested path selects only the shared base filename for the Threat
+    Composer JSON, Markdown, and extended snapshot artifacts.
 
     Args:
         project_directory: Authoritative directory being threat modeled
         output_path: Requested base filename, optionally with an extension
 
     Returns:
-        Absolute paths for the Threat Composer JSON and Markdown artifacts
+        Absolute paths for the Threat Composer JSON (``.tc.json``), Markdown
+        (``.md``), and extended server-state snapshot (``.extended.json``)
 
     Raises:
         ValueError: If no project is selected, the filename is invalid, or a
@@ -44,6 +45,8 @@ def resolve_export_paths(
 
     if filename.endswith(".tc.json"):
         base_filename = filename[:-len(".tc.json")]
+    elif filename.endswith(".extended.json"):
+        base_filename = filename[:-len(".extended.json")]
     elif filename.endswith(".json"):
         base_filename = filename[:-len(".json")]
     elif filename.endswith(".md"):
@@ -66,11 +69,12 @@ def resolve_export_paths(
 
     json_path = (threatmodel_path / f"{base_filename}.tc.json").resolve()
     markdown_path = (threatmodel_path / f"{base_filename}.md").resolve()
-    for resolved_path in (json_path, markdown_path):
+    extended_path = (threatmodel_path / f"{base_filename}.extended.json").resolve()
+    for resolved_path in (json_path, markdown_path, extended_path):
         if not resolved_path.is_relative_to(threatmodel_path):
             raise ValueError(
                 "The resolved export path is outside the selected project's "
                 ".threatmodel directory."
             )
 
-    return str(json_path), str(markdown_path)
+    return str(json_path), str(markdown_path), str(extended_path)

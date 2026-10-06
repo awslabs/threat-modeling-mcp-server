@@ -75,7 +75,7 @@ async def inspect_data_models_impl(
             result += f"- {available_model}\n"
         return result
 
-    logger.debug(f'Getting types for data model: {model_name}')
+    logger.debug('Getting types for data model')
 
     if model_name not in DATA_MODELS:
         available_models = ", ".join(sorted(DATA_MODELS.keys()))

@@ -87,14 +87,15 @@ class Threat(BaseModel):
     """Model for a threat."""
     id: str
     numericId: int
-    threatSource: str = Field(max_length=200)
-    prerequisites: str = Field(max_length=200)
-    threatAction: str = Field(max_length=200)
-    threatImpact: str = Field(max_length=200)
+    # Full text is kept; Threat Composer length limits apply only at export.
+    threatSource: str
+    prerequisites: str
+    threatAction: str
+    threatImpact: str
     impactedGoal: List[str] = []
     impactedAssets: List[str] = []
     metadata: List[MetadataItem] = []
-    statement: str = Field(max_length=1400)
+    statement: str
     displayOrder: int
     status: ThreatStatus = ThreatStatus.IDENTIFIED
     tags: List[str] = []

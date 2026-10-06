@@ -30,6 +30,31 @@ class TestServerContract:
         )
         assert is_valid, f"undocumented or stale tools: {issues}"
 
+    def test_export_guidance_describes_strict_and_extended_files(self):
+        from pathlib import Path
+
+        import threat_modeling_mcp_server.server as srv
+
+        root = Path(__file__).resolve().parent.parent
+        assert ".extended.json" in srv.SERVER_INSTRUCTIONS
+        assert "strict Threat Composer JSON" in srv.SERVER_INSTRUCTIONS
+        documents = {
+            "SERVER_INSTRUCTIONS": srv.SERVER_INSTRUCTIONS,
+            "README.md": (root / "README.md").read_text(encoding="utf-8"),
+            "phase-9 skill": (
+                root / ".kiro/skills/phase-9-output-generation/SKILL.md"
+            ).read_text(encoding="utf-8"),
+            "threat-modeler prompt": (
+                root / ".kiro/prompts/threat-modeler.md"
+            ).read_text(encoding="utf-8"),
+        }
+        for name, text in documents.items():
+            assert "ignores unknown" not in text, name
+            assert "ignores the extended" not in text, name
+            assert "will truncate" not in text, name
+        assert ".extended.json" in documents["README.md"]
+        assert "Export Warnings" in documents["README.md"]
+
 
 class TestStateCollectionIsNotStale:
     """The collector must read live module state, not from-imported values."""

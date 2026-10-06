@@ -4,15 +4,18 @@ This module provides tools for orchestrating the steps of the threat modeling pr
 including detailed guidance for each phase and automated execution of certain steps.
 """
 
+import asyncio
 from pathlib import Path
 from typing import Any, Dict, Literal, Optional
 from loguru import logger
 from mcp.server.fastmcp import Context
 from pydantic import Field
+from . import threat_model_plan
 from .threat_model_plan import (
+    CodeApplicability,
+    CodeScanResult,
     detect_code_in_directory,
     generate_threat_modeling_plan,
-    has_code_files,
 )
 
 # Phase status tracking
@@ -65,6 +68,25 @@ last_detection_error: Optional[str] = None
 # explicitly records the project being threat modeled.
 project_directory: Optional[str] = None
 
+# Cached code scan of project_directory. Refreshed when the project is
+# selected and once per export so repeated completion checks reuse it.
+project_code_scan: Optional[CodeScanResult] = None
+
+
+def refresh_project_code_scan() -> Optional[CodeScanResult]:
+    """Scan the selected project for code and cache the result.
+
+    Returns:
+        The new scan result, or None when no project is selected
+    """
+    global project_code_scan
+
+    if project_directory is None:
+        project_code_scan = None
+        return None
+    project_code_scan = threat_model_plan.scan_for_code(project_directory)
+    return project_code_scan
+
 
 def set_project_directory(directory: str) -> str:
     """Record the absolute directory that holds the project under review.
@@ -81,7 +103,14 @@ def set_project_directory(directory: str) -> str:
         raise ValueError("Project directory must be explicitly selected.")
 
     project_directory = str(Path(directory).expanduser().resolve())
-    applicable = phase_7_5_applicable()
+    scan = refresh_project_code_scan()
+    if scan.applicability is CodeApplicability.UNKNOWN_PARTIAL:
+        return (
+            f"Project directory set to '{project_directory}'. Code detection "
+            f"was incomplete ({scan.error_count} location(s) could not be "
+            "read), so phase 7.5 (Code Validation Analysis) applies."
+        )
+    applicable = scan.applicability is CodeApplicability.CODE_PRESENT
     return (
         f"Project directory set to '{project_directory}'. Code "
         f"{'was' if applicable else 'was not'} detected, so phase 7.5 (Code "
@@ -102,17 +131,30 @@ def phase_7_5_applicable(directory: Optional[str] = None) -> bool:
             apply.
 
     Returns:
-        True if code was detected
+        False only when a complete scan found no code; incomplete scans and
+        unexpected errors fail closed so the phase stays applicable
     """
     selected_directory = directory if directory is not None else project_directory
     if selected_directory is None:
         return False
 
     try:
-        return has_code_files(selected_directory)
+        if directory is not None:
+            scan = threat_model_plan.scan_for_code(directory)
+        elif (
+            project_code_scan is not None
+            and project_code_scan.directory == project_directory
+        ):
+            scan = project_code_scan
+        else:
+            scan = refresh_project_code_scan()
+        return scan.applicability is not CodeApplicability.NO_CODE
     except Exception as exc:  # pragma: no cover - defensive
-        logger.warning(f"Could not determine whether phase 7.5 applies: {exc}")
-        return False
+        logger.warning(
+            "Could not determine whether phase 7.5 applies "
+            f"({type(exc).__name__}); treating it as applicable"
+        )
+        return True
 
 
 def detect_phase_completion() -> None:
@@ -166,7 +208,10 @@ def detect_phase_completion() -> None:
         # complete or incomplete on the strength of a failed collection, and
         # record the failure so callers can refuse to rely on stale values.
         last_detection_error = str(e)
-        logger.warning(f"Failed to detect phase completion, keeping last known state: {e}")
+        logger.warning(
+            "Failed to detect phase completion, keeping last known state: "
+            f"{type(e).__name__}"
+        )
 
 
 def get_current_phase_auto() -> int:
@@ -680,11 +725,12 @@ Generate final documentation and outputs for integration with development proces
 1. **Export Comprehensive Threat Model**
    - First select the modeling context with `manage_workflow(action="set_project", directory=...)`
    - Use `export_threat_model(output_path="threat_model.json")` to choose a base filename, or omit `output_path` for a timestamped name
-   - Both artifacts are always created under the selected project's `.threatmodel` directory; directory components in `output_path` cannot redirect them
-   - Include all components, threats, mitigations, business context, assumptions, and phase progress
+   - Every artifact is always created under the selected project's `.threatmodel` directory; directory components in `output_path` cannot redirect them
+   - `<base>.tc.json` is strict Threat Composer JSON (the only importable file); `<base>.md` is the full report
+   - By default a separate `<base>.extended.json` server-state snapshot (NOT importable into Threat Composer) holds components, business context, profiles, and phase progress; pass `include_extended_data=False` to skip it
    - Include current threat and mitigation statuses, including updates made during code validation
-   - Compatible with AWS Threat Composer and includes extended data
-   - Both JSON and Markdown must succeed for the current model
+   - Fields over Threat Composer limits are shortened only in `.tc.json` and listed under Export Warnings
+   - Every requested file must succeed for the current model
 
 2. **Generate Summary Reports**
    - Use `manage_workflow(action="progress")` to create progress summary
@@ -711,7 +757,7 @@ Generate final documentation and outputs for integration with development proces
 - Security requirements documentation
 
 ## Completion Gate
-The most recent successful two-file export matches the current model fingerprint.
+The most recent successful export of every requested artifact matches the current model fingerprint.
 Any later model change reopens this phase.
 """
 
@@ -748,9 +794,8 @@ async def get_phase_guidance_impl(
         if search_directory is not None
         else False
     )
-    logger.info(
-        f"Code detected in directory '{search_directory}': {code_detected}"
-    )
+    # The scanned directory path is not logged.
+    logger.info(f"Code detected in selected directory: {code_detected}")
 
     if code_detected:
         next_steps = """## Next Steps
@@ -795,6 +840,10 @@ async def export_threat_model_impl(
                 'manage_workflow(action="set_project", directory=...) before export.'
             )
 
+        # Scan once, off the event loop. Completion checks before and after
+        # the writes reuse this cached result instead of rescanning.
+        await asyncio.to_thread(refresh_project_code_scan)
+
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         requested_path = (
             output_path
@@ -829,13 +878,12 @@ async def export_threat_model_impl(
 - **Phase**: {state_summary['progress']['current_phase']} - {state_summary['progress']['current_phase_name']}
 - **Overall Completion**: {state_summary['progress']['overall_completion']:.1%}
 
-Both files were written under the selected project's `.threatmodel` directory.
+All files were written under the selected project's `.threatmodel` directory.
 """
         return report.strip()
     except Exception as exc:
-        error_message = f"Failed to export threat model: {exc}"
-        logger.error(error_message)
-        return error_message
+        logger.error(f"Failed to export threat model: {type(exc).__name__}")
+        return f"Failed to export threat model: {exc}"
 
 
 def get_workflow_status() -> Dict[str, Any]:
@@ -1003,7 +1051,7 @@ async def manage_workflow_impl(
     if action == "set_project":
         if not directory:
             return "❌ action='set_project' requires directory."
-        return set_project_directory(directory)
+        return await asyncio.to_thread(set_project_directory, directory)
     if action == "advance":
         return await advance_phase_impl(ctx)
     return build_workflow_progress()
@@ -1065,12 +1113,13 @@ def register_tools(mcp):
         include_extended_data: bool = Field(
             default=True,
             description=(
-                "Include architecture, taxonomy profiles, workflow progress, "
-                "and other server extensions"
+                "Also write a separate <base>.extended.json server-state "
+                "snapshot (not importable into Threat Composer); the .tc.json "
+                "is always strict."
             ),
         ),
     ) -> str:
-        """Export Threat Composer JSON and Markdown plus a state summary."""
+        """Export strict Threat Composer JSON and Markdown plus a state summary."""
         return await export_threat_model_impl(
             ctx,
             output_path,

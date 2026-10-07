@@ -69,7 +69,7 @@ async def add_threat_actor_impl(
     Returns:
         A confirmation message with the threat actor ID
     """
-    logger.debug(f'Adding threat actor: {name}')
+    logger.debug('Adding threat actor')
 
     # Initialize threat actors if not already done
     initialize_threat_actors()

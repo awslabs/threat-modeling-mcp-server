@@ -88,7 +88,7 @@ async def add_asset_impl(
     Returns:
         A confirmation message with the asset ID
     """
-    logger.debug(f'Adding asset: {name}')
+    logger.debug('Adding asset')
 
     asset_id = next_id(assets, "A")
     asset = Asset(

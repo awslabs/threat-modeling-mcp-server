@@ -474,23 +474,28 @@ class TestOutputRendering:
         summary = await bctx.get_business_context_impl(_Ctx())
         assert "Multiple / other" in summary
 
-    def test_export_summary_does_not_claim_standard_only_when_extended(
+    def test_export_summary_labels_strict_and_extended_files_truthfully(
         self, tmp_path
     ):
         from threat_modeling_mcp_server.utils.comprehensive_exporter import (
             export_threat_model_files,
         )
 
+        strict_label = "Threat Composer JSON (strict import schema; import this file)"
         with_extended = export_threat_model_files(
             "claim_test", str(tmp_path), True,
         )
-        assert "contains only standard schema fields" not in with_extended
-        assert "extended taxonomy keys" in with_extended
+        assert strict_label in with_extended
+        assert "claim_test.extended.json" in with_extended
+        assert "NOT importable into Threat Composer" in with_extended
+        assert "ignores" not in with_extended
 
         standard_only = export_threat_model_files(
             "claim_test_std", str(tmp_path), False,
         )
-        assert "contains only standard schema fields" in standard_only
+        assert strict_label in standard_only
+        assert ".extended.json" not in standard_only
+        assert "ignores" not in standard_only
 
 
 class TestMarkdownExportIsComplete:

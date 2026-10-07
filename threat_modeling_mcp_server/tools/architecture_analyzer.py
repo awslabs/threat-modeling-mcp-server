@@ -103,7 +103,7 @@ async def add_component_impl(
     Returns:
         A confirmation message with the component ID
     """
-    logger.debug(f'Adding component: {name}')
+    logger.debug('Adding component')
     
     # Generate a unique ID
     component_id = next_id(components, "C")
@@ -488,7 +488,7 @@ async def add_data_store_impl(
     Returns:
         A confirmation message with the data store ID
     """
-    logger.debug(f'Adding data store: {name}')
+    logger.debug('Adding data store')
     
     # Generate a unique ID
     data_store_id = next_id(data_stores, "D")

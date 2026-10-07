@@ -521,7 +521,7 @@ async def set_business_context_with_features_impl(
     organizational_headquarters: Optional[str] = None,
 ) -> str:
     """Validate and atomically update the business context."""
-    logger.debug(f"Setting business context with features: {description}")
+    logger.debug("Setting business context")
 
     payload = {
         "description": description,

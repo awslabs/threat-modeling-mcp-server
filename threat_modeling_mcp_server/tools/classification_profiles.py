@@ -111,7 +111,7 @@ async def set_software_profile_impl(
     """Set the software classification profile for the system under analysis."""
     global software_profile
 
-    logger.debug(f"Setting software profile: {software_type}")
+    logger.debug("Setting software profile")
 
     software_profile = SoftwareProfile(
         software_type=software_type,
@@ -181,7 +181,7 @@ async def add_data_asset_profile_impl(
     description: Optional[str] = None,
 ) -> str:
     """Classify a data asset across the eight Data Classification dimensions."""
-    logger.debug(f"Adding data asset profile: {structural_category}")
+    logger.debug("Adding data asset profile")
 
     # The tool exposes this with a None default so the batch 'items' path can be
     # used on its own; say so plainly rather than failing in model validation.
@@ -379,7 +379,7 @@ async def add_user_persona_impl(
     description: Optional[str] = None,
 ) -> str:
     """Add a legitimate user persona that interacts with the system."""
-    logger.debug(f"Adding user persona: {persona_type}")
+    logger.debug("Adding user persona")
 
     # None default on the tool so 'items' can be used alone; see
     # add_data_asset_profile_impl.
@@ -443,7 +443,7 @@ async def set_nfr_requirement_impl(
     rationale: Optional[str] = None,
 ) -> str:
     """Record the required level for one non-functional quality class."""
-    logger.debug(f"Setting NFR {quality_class}: {level}")
+    logger.debug("Setting NFR requirement")
 
     requirement = NonFunctionalRequirement(
         quality_class=quality_class, level=level, rationale=rationale

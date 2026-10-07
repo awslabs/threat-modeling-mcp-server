@@ -39,7 +39,7 @@ STATEFUL_GLOBALS = {
     ),
     "threat_modeling_mcp_server.tools.step_orchestrator": (
         "phase_completion", "phase_blocking_reasons", "current_phase",
-        "last_detection_error", "project_directory",
+        "last_detection_error", "project_directory", "project_code_scan",
     ),
     "threat_modeling_mcp_server.tools.code_security_validator": (
         "validation_project_directory", "threat_findings", "mitigation_findings",

@@ -508,3 +508,265 @@ class TestDetectionFailureBlocksAdvancement:
 
         orch.detect_phase_completion()
         assert orch.last_detection_error is None
+
+
+class TestCodeScanner:
+    """One pruned, tri-state walk decides whether code is present."""
+
+    def test_dependency_only_tree_is_not_code(self, tmp_path):
+        from threat_modeling_mcp_server.tools.threat_model_plan import (
+            CodeApplicability, has_code_files, scan_for_code,
+        )
+
+        (tmp_path / "node_modules" / "pkg").mkdir(parents=True)
+        (tmp_path / "node_modules" / "pkg" / "vendored.js").write_text("x")
+        (tmp_path / "README.md").write_text("docs")
+
+        assert scan_for_code(str(tmp_path)).applicability is CodeApplicability.NO_CODE
+        assert has_code_files(str(tmp_path)) is False
+
+    def test_every_skipped_directory_is_pruned(self, tmp_path):
+        from threat_modeling_mcp_server.tools.threat_model_plan import (
+            SKIP_DIRECTORY_NAMES, CodeApplicability, scan_for_code,
+        )
+
+        for name in SKIP_DIRECTORY_NAMES:
+            (tmp_path / name).mkdir()
+            (tmp_path / name / "x.py").write_text("x = 1\n")
+
+        assert scan_for_code(str(tmp_path)).applicability is CodeApplicability.NO_CODE
+
+    def test_source_file_is_code(self, tmp_path):
+        from threat_modeling_mcp_server.tools.threat_model_plan import (
+            CodeApplicability, scan_for_code,
+        )
+
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "app.py").write_text("x = 1\n")
+
+        assert (
+            scan_for_code(str(tmp_path)).applicability
+            is CodeApplicability.CODE_PRESENT
+        )
+
+    @pytest.mark.parametrize(
+        "pattern, filename",
+        [("Dockerfile", "Dockerfile"), ("*.cdk.ts", "stack.cdk.ts")],
+    )
+    def test_custom_patterns(self, tmp_path, pattern, filename):
+        from threat_modeling_mcp_server.tools.threat_model_plan import (
+            CodeApplicability, scan_for_code,
+        )
+
+        (tmp_path / "infra").mkdir()
+        (tmp_path / "infra" / filename).write_text("x")
+        (tmp_path / "other.py").write_text("x = 1\n")
+
+        assert (
+            scan_for_code(str(tmp_path), [pattern]).applicability
+            is CodeApplicability.CODE_PRESENT
+        )
+        assert (
+            scan_for_code(str(tmp_path), ["*.nomatch"]).applicability
+            is CodeApplicability.NO_CODE
+        )
+
+    def test_directory_symlinks_are_not_followed(self, tmp_path):
+        from threat_modeling_mcp_server.tools.threat_model_plan import (
+            CodeApplicability, scan_for_code,
+        )
+
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "a.py").write_text("x = 1\n")
+        project = tmp_path / "project"
+        project.mkdir()
+        (project / "linked").symlink_to(outside, target_is_directory=True)
+
+        assert scan_for_code(str(project)).applicability is CodeApplicability.NO_CODE
+
+    def test_missing_root_is_unknown(self, tmp_path):
+        from threat_modeling_mcp_server.tools.threat_model_plan import (
+            CodeApplicability, has_code_files, scan_for_code,
+        )
+
+        missing = str(tmp_path / "missing")
+        assert (
+            scan_for_code(missing).applicability
+            is CodeApplicability.UNKNOWN_PARTIAL
+        )
+        assert has_code_files(missing) is True
+
+    def test_walk_errors_fail_closed(self, tmp_path, monkeypatch):
+        import threat_modeling_mcp_server.tools.threat_model_plan as plan
+
+        def failing_walk(top, topdown=True, onerror=None, followlinks=False):
+            onerror(PermissionError("denied"))
+            return iter(())
+
+        monkeypatch.setattr(plan.os, "walk", failing_walk)
+
+        result = plan.scan_for_code(str(tmp_path))
+        assert result.applicability is plan.CodeApplicability.UNKNOWN_PARTIAL
+        assert result.error_count == 1
+        assert plan.has_code_files(str(tmp_path)) is True
+
+    def test_single_walk_short_circuits_on_first_match(self, tmp_path, monkeypatch):
+        import threat_modeling_mcp_server.tools.threat_model_plan as plan
+
+        for index in range(5):
+            (tmp_path / f"d{index}").mkdir()
+            (tmp_path / f"d{index}" / "notes.txt").write_text("x")
+        (tmp_path / "app.py").write_text("x = 1\n")
+
+        real_walk = plan.os.walk
+        calls = {"walks": 0, "yields": 0}
+
+        def counting_walk(*args, **kwargs):
+            calls["walks"] += 1
+            for entry in real_walk(*args, **kwargs):
+                calls["yields"] += 1
+                yield entry
+
+        monkeypatch.setattr(plan.os, "walk", counting_walk)
+
+        assert plan.scan_for_code(str(tmp_path)).applicability is (
+            plan.CodeApplicability.CODE_PRESENT
+        )
+        # The root holds the match, so no subdirectory is visited.
+        assert calls == {"walks": 1, "yields": 1}
+
+    def test_no_match_scan_walks_tree_once(self, tmp_path, monkeypatch):
+        import threat_modeling_mcp_server.tools.threat_model_plan as plan
+
+        (tmp_path / "docs").mkdir()
+        (tmp_path / "docs" / "notes.txt").write_text("x")
+        real_walk = plan.os.walk
+        calls = {"walks": 0}
+
+        def counting_walk(*args, **kwargs):
+            calls["walks"] += 1
+            return real_walk(*args, **kwargs)
+
+        monkeypatch.setattr(plan.os, "walk", counting_walk)
+
+        assert plan.scan_for_code(str(tmp_path)).applicability is (
+            plan.CodeApplicability.NO_CODE
+        )
+        assert calls["walks"] == 1
+
+    @pytest.mark.asyncio
+    async def test_detection_does_not_block_event_loop(self, tmp_path, monkeypatch):
+        import asyncio
+        import threading
+
+        import threat_modeling_mcp_server.tools.threat_model_plan as plan
+
+        release = threading.Event()
+        fallback = threading.Timer(2.0, release.set)
+        fallback.start()
+
+        def blocking_scan(directory, file_patterns=None):
+            release.wait()
+            return plan.CodeScanResult(directory, plan.CodeApplicability.NO_CODE)
+
+        monkeypatch.setattr(plan, "scan_for_code", blocking_scan)
+        ticks = 0
+
+        async def heartbeat():
+            nonlocal ticks
+            while not release.is_set():
+                ticks += 1
+                if ticks >= 3:
+                    release.set()
+                await asyncio.sleep(0.05)
+
+        try:
+            detected, _ = await asyncio.gather(
+                plan.detect_code_in_directory(str(tmp_path)), heartbeat()
+            )
+        finally:
+            release.set()
+            fallback.cancel()
+
+        assert detected is False
+        assert ticks >= 2
+
+
+class TestProjectCodeScanCache:
+    """The orchestrator reuses one scan and fails closed on partial scans."""
+
+    @staticmethod
+    def _count_scans(monkeypatch, applicability=None):
+        import threading
+
+        import threat_modeling_mcp_server.tools.threat_model_plan as plan
+
+        real_scan = plan.scan_for_code
+        calls = []
+
+        def counting_scan(directory, file_patterns=None):
+            calls.append(threading.get_ident())
+            if applicability is not None:
+                return plan.CodeScanResult(directory, applicability, 1)
+            return real_scan(directory, file_patterns)
+
+        monkeypatch.setattr(plan, "scan_for_code", counting_scan)
+        return calls
+
+    def test_completion_checks_reuse_cached_scan(self, tmp_path, monkeypatch):
+        import threat_modeling_mcp_server.tools.step_orchestrator as orch
+
+        calls = self._count_scans(monkeypatch)
+        orch.set_project_directory(str(tmp_path))
+        assert len(calls) == 1
+
+        orch.detect_phase_completion()
+        orch.get_workflow_status()
+        assert len(calls) == 1
+
+    def test_partial_scan_keeps_phase_7_5_applicable(self, tmp_path, monkeypatch):
+        import threat_modeling_mcp_server.tools.step_orchestrator as orch
+        from threat_modeling_mcp_server.tools.threat_model_plan import (
+            CodeApplicability,
+        )
+
+        self._count_scans(monkeypatch, CodeApplicability.UNKNOWN_PARTIAL)
+        message = orch.set_project_directory(str(tmp_path))
+        orch.detect_phase_completion()
+
+        assert "incomplete" in message and "applies" in message
+        assert orch.phase_7_5_applicable() is True
+        assert orch.phase_completion[7.5] == 0.0
+
+    @pytest.mark.asyncio
+    async def test_set_project_scans_off_event_loop_thread(
+        self, tmp_path, monkeypatch,
+    ):
+        import threading
+
+        import threat_modeling_mcp_server.tools.step_orchestrator as orch
+
+        calls = self._count_scans(monkeypatch)
+        message = await orch.manage_workflow_impl(
+            _Ctx(), "set_project", directory=str(tmp_path)
+        )
+
+        assert "will be skipped" in message
+        assert calls and threading.get_ident() not in calls
+
+    @pytest.mark.asyncio
+    async def test_export_scans_exactly_once(self, tmp_path, monkeypatch):
+        import threading
+
+        import threat_modeling_mcp_server.tools.step_orchestrator as orch
+
+        calls = self._count_scans(monkeypatch)
+        orch.set_project_directory(str(tmp_path))
+        calls.clear()
+
+        result = await orch.export_threat_model_impl(_Ctx(), "model.json")
+
+        assert "Threat Model Export Complete" in result
+        assert len(calls) == 1
+        assert threading.get_ident() not in calls

@@ -41,7 +41,7 @@ SERVER_INSTRUCTIONS = """
 
     ### Workflow
     - `manage_workflow`: Describe, plan, get phase guidance/status/progress, set the project directory, and advance phases
-    - `export_threat_model`: Export Threat Composer JSON and Markdown, with a timestamped filename when no path is supplied
+    - `export_threat_model`: Export strict Threat Composer JSON (.tc.json) and Markdown under the selected project's .threatmodel; by default also a separate non-importable .extended.json server-state snapshot. Uses a timestamped filename when no path is supplied
 
     ### System Context
     - `manage_system_context`: Describe, plan, set, get/list, add/update/delete, validate, and clear business context plus software, data asset, user persona, and NFR profiles

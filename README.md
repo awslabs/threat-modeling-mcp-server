@@ -245,12 +245,25 @@ kiro-cli chat --agent threat-modeler
 
 Before exporting, select the directory being threat modeled with
 `manage_workflow(action="set_project", directory=...)`. The export tool always
-creates `<selected-project>/.threatmodel/` and writes both the Threat Composer
-`.tc.json` file and Markdown report there. Omitting `output_path` uses a
-timestamped base filename. Supplying `output_path` selects only the base
-filename; absolute paths, parent traversal, and other directory components
-cannot redirect either artifact outside the selected project's `.threatmodel`
-directory.
+creates `<selected-project>/.threatmodel/` and writes these artifacts there:
+
+- `<base>.tc.json`: strict AWS Threat Composer JSON. This is the only file to
+  import into Threat Composer. It holds only the standard schema keys, uses
+  deterministic UUID ids, and applies Threat Composer's field length limits.
+- `<base>.md`: the human-readable Markdown report with full text.
+- `<base>.extended.json`: a separate server-state snapshot (architecture,
+  taxonomy profiles, residual risk, phase progress) with internal ids and full
+  text. It is not importable into Threat Composer. Pass
+  `include_extended_data=False` to skip it.
+
+The stored model keeps full text. When a field exceeds a Threat Composer limit,
+only the `.tc.json` copy is shortened, and the tool response lists each
+shortened field (by entity, field, and length) under "Export Warnings".
+
+Omitting `output_path` uses a timestamped base filename. Supplying
+`output_path` selects only the base filename; absolute paths, parent
+traversal, and other directory components cannot redirect any artifact outside
+the selected project's `.threatmodel` directory.
 
 Validation and analysis tools generally return text through MCP rather than
 writing report files. The exported files are snapshots; the server does not

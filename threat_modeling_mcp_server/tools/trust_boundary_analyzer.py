@@ -37,7 +37,7 @@ async def add_trust_zone_impl(
     Returns:
         A confirmation message with the trust zone ID
     """
-    logger.debug(f'Adding trust zone: {name}')
+    logger.debug('Adding trust zone')
 
     # Generate a unique ID
     trust_zone_id = next_id(trust_zones, "TZ")
@@ -662,7 +662,7 @@ async def add_trust_boundary_impl(
     Returns:
         A confirmation message with the trust boundary ID
     """
-    logger.debug(f'Adding trust boundary: {name}')
+    logger.debug('Adding trust boundary')
 
     # Check if all crossing points exist
     for cp_id in crossing_point_ids:

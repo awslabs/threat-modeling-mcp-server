@@ -125,3 +125,27 @@ class TestDataModelRegistry:
             assert name in DATA_MODELS
         assert all(issubclass(enum_class, Enum) for enum_class in DATA_MODELS.values())
         assert len(DATA_MODELS) == len(set(DATA_MODELS.values()))
+
+
+class TestEnumMatchLoggingIsContentFree:
+    """The case-insensitive match log must not echo the caller-supplied text."""
+
+    def test_case_insensitive_match_logs_only_canonical_value(self):
+        from loguru import logger
+
+        class _SentinelEnum(str, Enum):
+            SENTINEL = "zqxenumsentinel"
+
+        caller_value = "  ZQXENUMSENTINEL  "
+        captured = []
+        sink_id = logger.add(captured.append, level="DEBUG")
+        try:
+            result = validate_enum_with_enhanced_error(caller_value, _SentinelEnum)
+        finally:
+            logger.remove(sink_id)
+
+        assert result is _SentinelEnum.SENTINEL
+        messages = [str(message) for message in captured]
+        assert any("case-insensitive" in m for m in messages), messages
+        # The canonical member value may appear; the raw caller text must not.
+        assert all("ZQXENUMSENTINEL" not in m for m in messages), messages

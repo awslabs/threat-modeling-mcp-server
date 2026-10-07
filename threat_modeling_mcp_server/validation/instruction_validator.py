@@ -36,7 +36,9 @@ def extract_tools_from_module(module) -> Set[str]:
             tools.add(match)
             
     except Exception as e:
-        logger.warning(f"Could not extract tools from module {module.__name__}: {e}")
+        logger.warning(
+            f"Could not extract tools from module {module.__name__}: {type(e).__name__}"
+        )
     
     return tools
 
@@ -143,7 +145,10 @@ def generate_tool_documentation(modules: List) -> str:
                 registered_tools[tool_name] = description
                 
         except Exception as e:
-            logger.warning(f"Could not extract tool documentation from module {module.__name__}: {e}")
+            logger.warning(
+                "Could not extract tool documentation from module "
+                f"{module.__name__}: {type(e).__name__}"
+            )
     
     # Generate markdown documentation
     doc_lines = []

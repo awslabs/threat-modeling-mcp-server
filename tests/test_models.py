@@ -75,6 +75,21 @@ class TestThreatModel:
         assert "comp1" in threat.affected_components
         assert "sql" in threat.tags
 
+    def test_threat_keeps_text_longer_than_threat_composer_limits(self):
+        """Internal threats store full text; limits apply only at export."""
+        threat = Threat(
+            id="T9",
+            numericId=9,
+            threatSource="s" * 300,
+            prerequisites="p" * 300,
+            threatAction="a" * 300,
+            threatImpact="i" * 300,
+            statement="x" * 1500,
+            displayOrder=9,
+        )
+        assert len(threat.threatSource) == 300
+        assert len(threat.statement) == 1500
+
     def test_threat_status_validation_case_insensitive(self):
         """Test that threat status accepts case-insensitive values."""
         threat = Threat(

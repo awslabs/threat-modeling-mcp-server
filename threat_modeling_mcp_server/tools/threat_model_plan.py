@@ -1,10 +1,30 @@
 """Threat Model Planning functionality for the Threat Modeling MCP Server."""
 
 import os
-import glob
+import fnmatch
 from typing import List, Optional
 from loguru import logger
 from mcp.server.fastmcp import Context
+
+# Directories that never contain the user's own source but can hold enormous
+# numbers of files (dependencies, VCS metadata, build output, virtualenvs).
+# Descending into these is the difference between a millisecond check and a
+# multi-minute filesystem walk, especially when the process working directory
+# is broad (for example "/" or a monorepo root).
+IGNORED_DIRECTORIES = {
+    ".git", ".hg", ".svn",
+    "node_modules", "bower_components",
+    ".venv", "venv", "env", "__pycache__", ".tox", ".mypy_cache",
+    ".pytest_cache", ".ruff_cache",
+    "dist", "build", "target", "out", ".next", ".nuxt",
+    ".idea", ".vscode", ".cache",
+    "cdk.out", ".terraform",
+}
+
+# Hard cap on how deep the scan descends from the starting directory. Code that
+# indicates "this is a project to threat model" lives near the top; there is no
+# need to traverse an entire filesystem to decide the answer is "yes".
+MAX_SCAN_DEPTH = 6
 
 CODE_FILE_PATTERNS = [
     # Common programming languages
@@ -33,10 +53,31 @@ def has_code_files(directory: str = ".", file_patterns: Optional[List[str]] = No
     Returns:
         True if code files are detected, False otherwise
     """
-    for pattern in file_patterns or CODE_FILE_PATTERNS:
-        if glob.glob(os.path.join(directory, "**", pattern), recursive=True):
-            logger.debug(f"Detected code files matching pattern {pattern}")
-            return True
+    patterns = file_patterns or CODE_FILE_PATTERNS
+    base = os.path.abspath(directory)
+    base_depth = base.rstrip(os.sep).count(os.sep)
+
+    for root, dirs, files in os.walk(base):
+        # Prune ignored directories in place so os.walk does not descend into
+        # them. Hidden directories (other than the base itself) are skipped too.
+        dirs[:] = [
+            d for d in dirs
+            if d not in IGNORED_DIRECTORIES and not d.startswith(".")
+        ]
+
+        # Enforce the depth cap: once we are MAX_SCAN_DEPTH levels below the
+        # start, stop descending further.
+        current_depth = root.rstrip(os.sep).count(os.sep) - base_depth
+        if current_depth >= MAX_SCAN_DEPTH:
+            dirs[:] = []
+
+        for filename in files:
+            for pattern in patterns:
+                if fnmatch.fnmatch(filename, pattern):
+                    logger.debug(
+                        f"Detected code file matching pattern {pattern}: {filename}"
+                    )
+                    return True
 
     logger.debug("No code files detected in the directory")
     return False

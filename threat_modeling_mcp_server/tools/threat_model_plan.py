@@ -27,14 +27,20 @@ CODE_FILE_PATTERNS = [
 
 
 # Directories that hold VCS metadata, dependencies, virtual environments,
-# caches, IDE settings, or build output. They are pruned before descent so
-# vendored or generated files never count as project code.
+# caches, IDE settings, or generated output. They are pruned before descent so
+# vendored or generated files never count as project code. Names projects
+# also use for real source, such as build/ (Go packaging, CI scripts) and
+# env/ (per-stage Terraform), are deliberately absent; virtual environments
+# under any name are recognized by VIRTUALENV_MARKER instead.
 SKIP_DIRECTORY_NAMES = frozenset({
-    ".git", ".hg", ".svn", "node_modules", "venv", ".venv", "env",
+    ".git", ".hg", ".svn", "node_modules", "venv", ".venv",
     "__pycache__", ".mypy_cache", ".pytest_cache", ".tox", ".ruff_cache",
-    "dist", "build", ".next", ".nuxt", "target", ".terraform", ".idea",
+    "dist", ".next", ".nuxt", "target", ".terraform", ".idea",
     ".vscode",
 })
+
+# File that marks the root of a Python virtual environment (PEP 405).
+VIRTUALENV_MARKER = "pyvenv.cfg"
 
 
 class CodeApplicability(str, Enum):
@@ -53,6 +59,7 @@ class CodeScanResult:
     directory: str
     applicability: CodeApplicability
     error_count: int = 0
+    unfollowed_symlink_count: int = 0
 
 
 def scan_for_code(
@@ -61,10 +68,11 @@ def scan_for_code(
 ) -> CodeScanResult:
     """Scan a directory tree once for files matching any code pattern.
 
-    The walk prunes dependency, cache, build, and hidden directories before
-    descending, never follows directory symlinks, and stops at the first
-    match. Only an error-free walk of an existing directory with no match
-    reports ``NO_CODE``; anything incomplete reports ``UNKNOWN_PARTIAL``.
+    The walk prunes dependency, cache, generated-output, virtual-environment,
+    and hidden directories before descending, never follows directory
+    symlinks, and stops at the first match. Only a walk of an existing
+    directory with no errors and no directory symlinks to targets outside the
+    tree reports ``NO_CODE``; anything incomplete reports ``UNKNOWN_PARTIAL``.
 
     Args:
         directory: Directory to scan
@@ -75,38 +83,63 @@ def scan_for_code(
     """
     patterns = list(file_patterns or CODE_FILE_PATTERNS)
     errors: List[OSError] = []
+    unfollowed_symlinks = 0
 
     if not os.path.isdir(directory):
         logger.debug("Code scan root is not a directory")
         return CodeScanResult(directory, CodeApplicability.UNKNOWN_PARTIAL, 1)
 
+    real_root = os.path.realpath(directory)
+
+    def outside_tree(path: str) -> bool:
+        target = os.path.realpath(path)
+        try:
+            return os.path.commonpath([real_root, target]) != real_root
+        except ValueError:  # different drives on Windows
+            return True
+
     for root, dirnames, filenames in os.walk(
         directory, topdown=True, onerror=errors.append, followlinks=False
     ):
+        if root != directory and VIRTUALENV_MARKER in filenames:
+            # Installed packages, not project code, whatever the directory name.
+            dirnames[:] = []
+            continue
+
         # Prune in place so os.walk never descends into skipped directories.
-        dirnames[:] = [
-            name for name in dirnames
-            if name not in SKIP_DIRECTORY_NAMES
-            and not name.startswith(".")
-            and not os.path.islink(os.path.join(root, name))
-        ]
+        kept = []
+        for name in dirnames:
+            if name in SKIP_DIRECTORY_NAMES or name.startswith("."):
+                continue
+            path = os.path.join(root, name)
+            if os.path.islink(path):
+                # Never followed. A target inside the tree is walked on its
+                # own; one outside stays unscanned, so absence is unproven.
+                if outside_tree(path):
+                    unfollowed_symlinks += 1
+                continue
+            kept.append(name)
+        dirnames[:] = kept
+
         for filename in filenames:
             if filename.startswith("."):
                 continue
             if any(fnmatch.fnmatchcase(filename, pattern) for pattern in patterns):
                 logger.debug("Code scan result: CODE_PRESENT")
                 return CodeScanResult(
-                    directory, CodeApplicability.CODE_PRESENT, len(errors)
+                    directory, CodeApplicability.CODE_PRESENT, len(errors),
+                    unfollowed_symlinks,
                 )
 
     applicability = (
-        CodeApplicability.NO_CODE if not errors
+        CodeApplicability.NO_CODE if not errors and not unfollowed_symlinks
         else CodeApplicability.UNKNOWN_PARTIAL
     )
     logger.debug(
-        f"Code scan result: {applicability.value} ({len(errors)} error(s))"
+        f"Code scan result: {applicability.value} ({len(errors)} error(s), "
+        f"{unfollowed_symlinks} unfollowed directory symlink(s))"
     )
-    return CodeScanResult(directory, applicability, len(errors))
+    return CodeScanResult(directory, applicability, len(errors), unfollowed_symlinks)
 
 
 def has_code_files(directory: str = ".", file_patterns: Optional[List[str]] = None) -> bool:

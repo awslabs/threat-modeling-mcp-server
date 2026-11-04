@@ -807,6 +807,14 @@ def export_threat_model_files(
     if markdown_success:
         summary += "\nThe Markdown file contains a comprehensive, human-readable threat model report with all sections and data."
 
+    # A skipped snapshot never overwrites one from an earlier export with the
+    # same base name; say so, since that file names this .tc.json as its pair.
+    if not include_extended_data and os.path.exists(extended_path):
+        summary += (
+            f"\n\n**Note**: `{os.path.basename(extended_path)}` from an earlier "
+            "export was left unchanged and does not reflect this export."
+        )
+
     if warnings:
         full_text_holders = (
             "The stored model, Markdown, and extended snapshot keep the full text."

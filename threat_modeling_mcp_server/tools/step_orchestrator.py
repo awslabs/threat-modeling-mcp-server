@@ -102,13 +102,30 @@ def set_project_directory(directory: str) -> str:
     if not directory:
         raise ValueError("Project directory must be explicitly selected.")
 
-    project_directory = str(Path(directory).expanduser().resolve())
+    resolved_directory = Path(directory).expanduser().resolve()
+    # A mistyped path must not become the project: code validation and every
+    # export would silently target it.
+    if not resolved_directory.is_dir():
+        raise ValueError(
+            f"Project directory '{resolved_directory}' does not exist or is "
+            "not a directory. Check the path, or create the directory first."
+        )
+
+    project_directory = str(resolved_directory)
     scan = refresh_project_code_scan()
     if scan.applicability is CodeApplicability.UNKNOWN_PARTIAL:
+        gaps = []
+        if scan.error_count:
+            gaps.append(f"{scan.error_count} location(s) could not be read")
+        if scan.unfollowed_symlink_count:
+            gaps.append(
+                f"{scan.unfollowed_symlink_count} directory symlink(s) were "
+                "not followed"
+            )
         return (
             f"Project directory set to '{project_directory}'. Code detection "
-            f"was incomplete ({scan.error_count} location(s) could not be "
-            "read), so phase 7.5 (Code Validation Analysis) applies."
+            f"was incomplete ({'; '.join(gaps)}), so phase 7.5 (Code "
+            "Validation Analysis) applies."
         )
     applicable = scan.applicability is CodeApplicability.CODE_PRESENT
     return (
@@ -1051,7 +1068,10 @@ async def manage_workflow_impl(
     if action == "set_project":
         if not directory:
             return "❌ action='set_project' requires directory."
-        return await asyncio.to_thread(set_project_directory, directory)
+        try:
+            return await asyncio.to_thread(set_project_directory, directory)
+        except ValueError as exc:
+            return f"❌ {exc}"
     if action == "advance":
         return await advance_phase_impl(ctx)
     return build_workflow_progress()

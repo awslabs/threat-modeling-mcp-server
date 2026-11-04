@@ -106,6 +106,36 @@ class TestExportFilenames:
         assert (export_dir / "my_model.extended.json").is_file()
         assert not (export_dir / "my_model.extended.tc.json").exists()
 
+    def test_skipped_snapshot_reports_earlier_snapshot_left_in_place(
+        self, tmp_path, export_dir,
+    ):
+        """A same-base snapshot from an earlier export is flagged as stale."""
+        export_threat_model_files("my_model", str(tmp_path))
+        earlier = (export_dir / "my_model.extended.json").read_text()
+
+        result = export_threat_model_files(
+            "my_model", str(tmp_path), include_extended_data=False,
+        )
+
+        assert "`my_model.extended.json` from an earlier export" in result
+        assert (export_dir / "my_model.extended.json").read_text() == earlier
+
+    def test_skipped_snapshot_without_earlier_file_has_no_note(
+        self, tmp_path, export_dir,
+    ):
+        result = export_threat_model_files(
+            "my_model", str(tmp_path), include_extended_data=False,
+        )
+
+        assert "from an earlier export" not in result
+
+    def test_written_snapshot_has_no_stale_note(self, tmp_path, export_dir):
+        export_threat_model_files("my_model", str(tmp_path))
+
+        result = export_threat_model_files("my_model", str(tmp_path))
+
+        assert "from an earlier export" not in result
+
 
 class TestExportContent:
     """Tests for the content of the exported Threat Composer JSON."""

@@ -479,6 +479,48 @@ class TestProjectDirectoryDrivesPhase75:
 
         assert orch.project_directory == str((tmp_path / "project").resolve())
 
+    @pytest.mark.parametrize("kind", ["missing", "file"])
+    def test_missing_or_file_directory_is_rejected(self, tmp_path, kind):
+        import threat_modeling_mcp_server.tools.step_orchestrator as orch
+
+        selected = tmp_path / "selected"
+        orch.set_project_directory(str(tmp_path))
+        if kind == "file":
+            selected.write_text("not a directory")
+
+        with pytest.raises(ValueError, match="does not exist or is not a directory"):
+            orch.set_project_directory(str(selected))
+        assert orch.project_directory == str(tmp_path.resolve())
+        assert orch.project_code_scan.directory == str(tmp_path.resolve())
+
+    @pytest.mark.asyncio
+    async def test_manage_workflow_reports_missing_directory(self, tmp_path):
+        import threat_modeling_mcp_server.tools.step_orchestrator as orch
+
+        message = await orch.manage_workflow_impl(
+            _Ctx(), "set_project", directory=str(tmp_path / "typo")
+        )
+
+        assert message.startswith("❌ Project directory")
+        assert "does not exist" in message
+        assert not (tmp_path / "typo").exists()
+
+    def test_unfollowed_symlink_is_explained_when_selected(self, tmp_path):
+        import threat_modeling_mcp_server.tools.step_orchestrator as orch
+
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        project = tmp_path / "project"
+        project.mkdir()
+        (project / "shared").symlink_to(outside, target_is_directory=True)
+
+        message = orch.set_project_directory(str(project))
+
+        assert "1 directory symlink(s) were not followed" in message
+        assert "could not be read" not in message
+        assert "applies" in message
+        assert orch.phase_7_5_applicable() is True
+
 
 class TestDetectionFailureBlocksAdvancement:
     """A failed detection must not let a stale snapshot authorize advancing."""
@@ -571,9 +613,42 @@ class TestCodeScanner:
             is CodeApplicability.NO_CODE
         )
 
-    def test_directory_symlinks_are_not_followed(self, tmp_path):
+    @pytest.mark.parametrize("name", ["build", "env"])
+    def test_source_under_common_source_directory_names_is_code(
+        self, tmp_path, name,
+    ):
+        """build/ and env/ often hold real source, so they are scanned."""
         from threat_modeling_mcp_server.tools.threat_model_plan import (
             CodeApplicability, scan_for_code,
+        )
+
+        (tmp_path / name / "prod").mkdir(parents=True)
+        (tmp_path / name / "prod" / "main.tf").write_text("terraform {}\n")
+        (tmp_path / "README.md").write_text("docs")
+
+        assert (
+            scan_for_code(str(tmp_path)).applicability
+            is CodeApplicability.CODE_PRESENT
+        )
+
+    @pytest.mark.parametrize("name", ["env", "py310-env"])
+    def test_virtualenv_under_any_name_is_pruned(self, tmp_path, name):
+        from threat_modeling_mcp_server.tools.threat_model_plan import (
+            VIRTUALENV_MARKER, CodeApplicability, scan_for_code,
+        )
+
+        venv = tmp_path / name
+        (venv / "lib" / "site-packages").mkdir(parents=True)
+        (venv / VIRTUALENV_MARKER).write_text("home = /usr/bin\n")
+        (venv / "lib" / "site-packages" / "dep.py").write_text("x = 1\n")
+        (venv / "activate.ps1").write_text("x")
+        (tmp_path / "README.md").write_text("docs")
+
+        assert scan_for_code(str(tmp_path)).applicability is CodeApplicability.NO_CODE
+
+    def test_directory_symlinks_are_not_followed(self, tmp_path):
+        from threat_modeling_mcp_server.tools.threat_model_plan import (
+            CodeApplicability, has_code_files, scan_for_code,
         )
 
         outside = tmp_path / "outside"
@@ -583,7 +658,64 @@ class TestCodeScanner:
         project.mkdir()
         (project / "linked").symlink_to(outside, target_is_directory=True)
 
-        assert scan_for_code(str(project)).applicability is CodeApplicability.NO_CODE
+        result = scan_for_code(str(project))
+
+        # The unscanned target may hold code, so absence is unproven.
+        assert result.applicability is CodeApplicability.UNKNOWN_PARTIAL
+        assert result.error_count == 0
+        assert result.unfollowed_symlink_count == 1
+        assert has_code_files(str(project)) is True
+
+    def test_symlink_into_the_tree_does_not_make_scan_partial(self, tmp_path):
+        from threat_modeling_mcp_server.tools.threat_model_plan import (
+            CodeApplicability, scan_for_code,
+        )
+
+        (tmp_path / "docs" / "guide").mkdir(parents=True)
+        (tmp_path / "docs" / "guide" / "notes.txt").write_text("x")
+        (tmp_path / "docs" / "up").symlink_to(tmp_path, target_is_directory=True)
+        (tmp_path / "guide").symlink_to(
+            tmp_path / "docs" / "guide", target_is_directory=True,
+        )
+
+        result = scan_for_code(str(tmp_path))
+
+        assert result.applicability is CodeApplicability.NO_CODE
+        assert result.unfollowed_symlink_count == 0
+
+    def test_symlinked_skip_directory_is_pruned_without_counting(self, tmp_path):
+        from threat_modeling_mcp_server.tools.threat_model_plan import (
+            CodeApplicability, scan_for_code,
+        )
+
+        store = tmp_path / "store"
+        store.mkdir()
+        (store / "dep.js").write_text("x")
+        project = tmp_path / "project"
+        project.mkdir()
+        (project / "node_modules").symlink_to(store, target_is_directory=True)
+
+        result = scan_for_code(str(project))
+
+        assert result.applicability is CodeApplicability.NO_CODE
+        assert result.unfollowed_symlink_count == 0
+
+    def test_code_found_despite_unfollowed_symlink_is_code(self, tmp_path):
+        from threat_modeling_mcp_server.tools.threat_model_plan import (
+            CodeApplicability, scan_for_code,
+        )
+
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        project = tmp_path / "project"
+        (project / "src").mkdir(parents=True)
+        (project / "linked").symlink_to(outside, target_is_directory=True)
+        (project / "src" / "app.py").write_text("x = 1\n")
+
+        assert (
+            scan_for_code(str(project)).applicability
+            is CodeApplicability.CODE_PRESENT
+        )
 
     def test_missing_root_is_unknown(self, tmp_path):
         from threat_modeling_mcp_server.tools.threat_model_plan import (

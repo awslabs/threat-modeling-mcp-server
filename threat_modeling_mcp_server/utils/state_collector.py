@@ -545,7 +545,7 @@ def get_state_summary() -> Dict[str, Any]:
             "blocking_reasons": (
                 []
                 if export_is_current
-                else ["Export the current model to both JSON and Markdown."]
+                else ["Export the current model and write every requested file."]
             ),
         },
         "phase_readiness": {
@@ -605,7 +605,7 @@ def get_state_summary() -> Dict[str, Any]:
                 "blocking_reasons": (
                     []
                     if export_is_current
-                    else ["Export the current model to both JSON and Markdown."]
+                    else ["Export the current model and write every requested file."]
                 ),
             },
         },

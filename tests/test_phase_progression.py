@@ -2,6 +2,8 @@
 
 import pytest
 
+from threat_modeling_mcp_server.tools.threat_model_plan import SKIP_DIRECTORY_NAMES
+
 
 class _Ctx:
     """Minimal MCP context stub."""
@@ -577,6 +579,112 @@ class TestCodeScanner:
             (tmp_path / name / "x.py").write_text("x = 1\n")
 
         assert scan_for_code(str(tmp_path)).applicability is CodeApplicability.NO_CODE
+
+    @pytest.mark.parametrize("name", sorted(SKIP_DIRECTORY_NAMES))
+    def test_file_named_like_skipped_directory_is_scanned(self, tmp_path, name):
+        from threat_modeling_mcp_server.tools.threat_model_plan import (
+            CodeApplicability, scan_for_code,
+        )
+
+        # Hidden files stay skipped, as in the os.walk scanner they replace.
+        expected = (
+            CodeApplicability.NO_CODE if name.startswith(".")
+            else CodeApplicability.CODE_PRESENT
+        )
+        file_root = tmp_path / "file"
+        file_root.mkdir()
+        (file_root / name).write_text("x = 1\n")
+        assert (
+            scan_for_code(str(file_root), file_patterns=[name]).applicability
+            is expected
+        )
+
+        # The directory form of the same name stays pruned.
+        dir_root = tmp_path / "dir"
+        dir_root.mkdir()
+        (dir_root / name).mkdir()
+        (dir_root / name / name).write_text("x = 1\n")
+        assert (
+            scan_for_code(str(dir_root), file_patterns=[name]).applicability
+            is CodeApplicability.NO_CODE
+        )
+
+    @pytest.mark.parametrize("name", sorted(SKIP_DIRECTORY_NAMES))
+    def test_symlink_named_like_skipped_directory(self, tmp_path, name):
+        from threat_modeling_mcp_server.tools.threat_model_plan import (
+            CodeApplicability, scan_for_code,
+        )
+
+        # A same-named link to a file is a file, as in a plain directory walk;
+        # hidden names stay skipped.
+        expected = (
+            CodeApplicability.NO_CODE if name.startswith(".")
+            else CodeApplicability.CODE_PRESENT
+        )
+        file_root = tmp_path / "file"
+        file_root.mkdir()
+        (file_root / ".target").write_text("x = 1\n")
+        (file_root / name).symlink_to(file_root / ".target")
+        assert (
+            scan_for_code(str(file_root), file_patterns=[name]).applicability
+            is expected
+        )
+
+        # A same-named directory alias stays pruned.
+        dir_root = tmp_path / "dir"
+        (dir_root / ".hidden").mkdir(parents=True)
+        (dir_root / ".hidden" / "app.py").write_text("x = 1\n")
+        (dir_root / name).symlink_to(
+            dir_root / ".hidden", target_is_directory=True
+        )
+        assert (
+            scan_for_code(str(dir_root)).applicability
+            is CodeApplicability.NO_CODE
+        )
+
+    @pytest.mark.parametrize("name", ["build", "target", "node_modules"])
+    @pytest.mark.parametrize("link_form", ["parent_relative", "outside_root", "dangling"])
+    def test_unresolvable_skip_named_file_link_is_scanned(
+        self, tmp_path, name, link_form,
+    ):
+        import os
+        from threat_modeling_mcp_server.tools.threat_model_plan import (
+            CodeApplicability, scan_for_code,
+        )
+
+        # Links the scanner declines to resolve are still matched by name
+        # unless they point at a directory, as in a plain directory walk.
+        root = tmp_path / "root"
+        (root / "sub").mkdir(parents=True)
+        if link_form == "parent_relative":
+            (root / "real").write_text("x = 1\n")
+            os.symlink(os.path.join("..", "real"), root / "sub" / name)
+        elif link_form == "outside_root":
+            (tmp_path / "outside").write_text("x = 1\n")
+            (root / "sub" / name).symlink_to(tmp_path / "outside")
+        else:
+            (root / "sub" / name).symlink_to(root / "missing")
+        assert (
+            scan_for_code(str(root), file_patterns=[name]).applicability
+            is CodeApplicability.CODE_PRESENT
+        )
+
+    @pytest.mark.parametrize("name", ["build", "target", "node_modules"])
+    def test_outside_root_skip_named_directory_link_is_pruned(self, tmp_path, name):
+        from threat_modeling_mcp_server.tools.threat_model_plan import (
+            CodeApplicability, scan_for_code,
+        )
+
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "app.py").write_text("x = 1\n")
+        root = tmp_path / "root"
+        root.mkdir()
+        (root / name).symlink_to(outside, target_is_directory=True)
+        assert (
+            scan_for_code(str(root)).applicability
+            is CodeApplicability.NO_CODE
+        )
 
     def test_source_file_is_code(self, tmp_path):
         from threat_modeling_mcp_server.tools.threat_model_plan import (

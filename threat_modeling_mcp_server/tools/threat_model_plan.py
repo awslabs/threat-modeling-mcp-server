@@ -443,12 +443,15 @@ def scan_for_code(
                                 continue
 
                             name = entry.name
-                            if name.startswith(".") or name in SKIP_DIRECTORY_NAMES:
+                            if name.startswith("."):
                                 continue
                             if stat.S_ISLNK(entry_stat.st_mode):
                                 symlink_entries.append((name, entry_stat))
                                 continue
                             if stat.S_ISDIR(entry_stat.st_mode):
+                                # Skip names prune directories, not files.
+                                if name in SKIP_DIRECTORY_NAMES:
+                                    continue
                                 child_parts = [*components, name]
                                 child_identity = directory_identity(
                                     entry_stat, canonical_path(child_parts)
@@ -502,9 +505,33 @@ def scan_for_code(
                             walk_fd, components, name, entry_stat
                         )
                     except LinkResolutionFailure as failure:
-                        record_link_failure(failure)
+                        if name not in SKIP_DIRECTORY_NAMES:
+                            record_link_failure(failure)
+                            continue
+                        # A skip-named link that cannot be resolved is
+                        # pruned only if it aliases a directory; otherwise
+                        # (including dangling) it is matched by name only.
+                        try:
+                            if stat.S_ISDIR(
+                                os.stat(
+                                    name, dir_fd=walk_fd, follow_symlinks=True
+                                ).st_mode
+                            ):
+                                continue
+                        except OSError:
+                            pass
+                        if (
+                            scanned_file_count + len(file_names)
+                            >= MAX_SCAN_FILES
+                        ):
+                            record_error()
+                            stop_traversal = True
+                            break
+                        file_names.append(name)
                         continue
                     if stat.S_ISDIR(target_stat.st_mode):
+                        if name in SKIP_DIRECTORY_NAMES:
+                            continue
                         symlink_target_identities.add(
                             directory_identity(
                                 target_stat, canonical_path(target_parts)

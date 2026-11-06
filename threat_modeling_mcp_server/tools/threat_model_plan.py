@@ -3,6 +3,7 @@
 import asyncio
 import fnmatch
 import os
+import stat
 from dataclasses import dataclass
 from enum import Enum
 from typing import List, Optional
@@ -27,17 +28,24 @@ CODE_FILE_PATTERNS = [
 
 
 # Directories that hold VCS metadata, dependencies, virtual environments,
-# caches, IDE settings, or generated output. They are pruned before descent so
-# vendored or generated files never count as project code. Names projects
-# also use for real source, such as build/ (Go packaging, CI scripts) and
-# env/ (per-stage Terraform), are deliberately absent; virtual environments
-# under any name are recognized by VIRTUALENV_MARKER instead.
+# caches, IDE settings, build artifacts, or generated output. They are pruned
+# before descent so vendored or generated files never count as project code.
+# Names projects also use for real source, such as env/ (per-stage Terraform),
+# are deliberately absent; virtual environments under any name are recognized
+# by VIRTUALENV_MARKER instead.
 SKIP_DIRECTORY_NAMES = frozenset({
     ".git", ".hg", ".svn", "node_modules", "venv", ".venv",
     "__pycache__", ".mypy_cache", ".pytest_cache", ".tox", ".ruff_cache",
-    "dist", ".next", ".nuxt", "target", ".terraform", ".idea",
+    "dist", "build", ".next", ".nuxt", "target", ".terraform", ".idea",
     ".vscode",
 })
+
+# Resource bounds ensure an incomplete scan cannot consume an unbounded tree.
+MAX_SCAN_DEPTH = 1_000
+MAX_SCAN_DIRECTORIES = 100_000
+MAX_SCAN_FILES = 1_000_000
+MAX_SCAN_ENTRIES = MAX_SCAN_DIRECTORIES + MAX_SCAN_FILES
+MAX_SCAN_SYMLINK_HOPS = 40
 
 # File that marks the root of a Python virtual environment (PEP 405).
 VIRTUALENV_MARKER = "pyvenv.cfg"
@@ -68,11 +76,11 @@ def scan_for_code(
 ) -> CodeScanResult:
     """Scan a directory tree once for files matching any code pattern.
 
-    The walk prunes dependency, cache, generated-output, virtual-environment,
-    and hidden directories before descending, never follows directory
-    symlinks, and stops at the first match. Only a walk of an existing
-    directory with no errors and no directory symlinks to targets outside the
-    tree reports ``NO_CODE``; anything incomplete reports ``UNKNOWN_PARTIAL``.
+    The walk prunes dependency, cache, build, virtual-environment, and hidden
+    directories before descending, never follows directory symlinks, and stops
+    at the first match. A visible directory symlink is considered covered only
+    when the same target is reached through an ordinary, non-pruned path.
+    Anything incomplete reports ``UNKNOWN_PARTIAL`` rather than ``NO_CODE``.
 
     Args:
         directory: Directory to scan
@@ -82,64 +90,501 @@ def scan_for_code(
         The scan result
     """
     patterns = list(file_patterns or CODE_FILE_PATTERNS)
-    errors: List[OSError] = []
-    unfollowed_symlinks = 0
+    error_count = 0
+    walked_directory_count = 0
+    scanned_file_count = 0
+    listed_entry_count = 0
+    covered_directory_identities = set()
+    scheduled_directory_identities = set()
+    symlink_target_identities = set()
+    unresolved_symlink_targets = set()
 
-    if not os.path.isdir(directory):
+    def record_error(_error: Optional[OSError] = None) -> None:
+        nonlocal error_count
+        error_count += 1
+
+    try:
+        real_root = os.path.realpath(directory, strict=True)
+        root_stat = os.stat(real_root, follow_symlinks=False)
+    except (OSError, ValueError):
+        logger.debug("Code scan root could not be resolved")
+        return CodeScanResult(directory, CodeApplicability.UNKNOWN_PARTIAL, 1)
+
+    if not stat.S_ISDIR(root_stat.st_mode):
         logger.debug("Code scan root is not a directory")
         return CodeScanResult(directory, CodeApplicability.UNKNOWN_PARTIAL, 1)
 
-    real_root = os.path.realpath(directory)
+    required_os_features = (
+        "O_DIRECTORY", "O_NOFOLLOW", "readlink", "scandir",
+    )
+    if not all(hasattr(os, name) for name in required_os_features):
+        logger.debug("Code scan cannot enforce descriptor-relative confinement")
+        return CodeScanResult(directory, CodeApplicability.UNKNOWN_PARTIAL, 1)
 
-    def outside_tree(path: str) -> bool:
-        target = os.path.realpath(path)
+    directory_open_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    root_fd = None
+    try:
+        root_fd = os.open(real_root, directory_open_flags)
+        anchored_root_stat = os.fstat(root_fd)
+    except OSError:
+        if root_fd is not None:
+            os.close(root_fd)
+        logger.debug("Code scan root could not be opened safely")
+        return CodeScanResult(directory, CodeApplicability.UNKNOWN_PARTIAL, 1)
+
+    if not os.path.samestat(root_stat, anchored_root_stat):
+        os.close(root_fd)
+        logger.debug("Code scan root changed before traversal")
+        return CodeScanResult(directory, CodeApplicability.UNKNOWN_PARTIAL, 1)
+
+    normalized_root = os.path.normcase(real_root)
+
+    def is_inside_root(path: str) -> bool:
         try:
-            return os.path.commonpath([real_root, target]) != real_root
+            return os.path.commonpath(
+                [normalized_root, os.path.normcase(path)]
+            ) == normalized_root
         except ValueError:  # different drives on Windows
-            return True
+            return False
 
-    for root, dirnames, filenames in os.walk(
-        directory, topdown=True, onerror=errors.append, followlinks=False
-    ):
-        if root != directory and VIRTUALENV_MARKER in filenames:
-            # Installed packages, not project code, whatever the directory name.
-            dirnames[:] = []
-            continue
+    def directory_identity(target_stat, canonical_path: str):
+        if not stat.S_ISDIR(target_stat.st_mode):
+            raise NotADirectoryError(canonical_path)
+        if target_stat.st_ino:
+            return ("inode", target_stat.st_dev, target_stat.st_ino)
+        return ("path", os.path.normcase(canonical_path))
 
-        # Prune in place so os.walk never descends into skipped directories.
-        kept = []
-        for name in dirnames:
-            if name in SKIP_DIRECTORY_NAMES or name.startswith("."):
-                continue
-            path = os.path.join(root, name)
-            if os.path.islink(path):
-                # Never followed. A target inside the tree is walked on its
-                # own; one outside stays unscanned, so absence is unproven.
-                if outside_tree(path):
-                    unfollowed_symlinks += 1
-                continue
-            kept.append(name)
-        dirnames[:] = kept
+    def link_identity(target_stat, path: str):
+        if target_stat.st_ino:
+            return ("inode", target_stat.st_dev, target_stat.st_ino)
+        return ("path", os.path.normcase(path))
 
-        for filename in filenames:
-            if filename.startswith("."):
-                continue
-            if any(fnmatch.fnmatchcase(filename, pattern) for pattern in patterns):
-                logger.debug("Code scan result: CODE_PRESENT")
-                return CodeScanResult(
-                    directory, CodeApplicability.CODE_PRESENT, len(errors),
-                    unfollowed_symlinks,
+    def canonical_path(components) -> str:
+        return os.path.join(real_root, *components)
+
+    def path_components(path: str):
+        normalized = os.path.normpath(path)
+        if normalized in ("", os.curdir):
+            return []
+        return normalized.split(os.sep)
+
+    def open_anchored_directory(components, expected_identity=None):
+        """Open an ordinary root-relative directory without following links."""
+        current_fd = os.dup(root_fd)
+        try:
+            for component in components:
+                next_fd = os.open(
+                    component, directory_open_flags, dir_fd=current_fd
                 )
+                os.close(current_fd)
+                current_fd = next_fd
+            current_stat = os.fstat(current_fd)
+            current_identity = directory_identity(
+                current_stat, canonical_path(components)
+            )
+            if (
+                expected_identity is not None
+                and current_identity != expected_identity
+            ):
+                raise OSError("directory changed during code scan")
+            return current_fd, current_stat
+        except Exception:
+            os.close(current_fd)
+            raise
 
+    def root_path_matches_anchor() -> bool:
+        try:
+            return os.path.samestat(
+                os.stat(real_root, follow_symlinks=False), anchored_root_stat
+            )
+        except OSError:
+            return False
+
+    def descriptor_matches_anchored_path(
+        directory_fd, directory_stat, components, expected_identity,
+    ) -> bool:
+        if not root_path_matches_anchor():
+            return False
+        try:
+            validation_fd, _ = open_anchored_directory(
+                components, expected_identity
+            )
+            try:
+                current_stat = os.fstat(directory_fd)
+                return (
+                    os.path.samestat(current_stat, directory_stat)
+                    and os.path.samestat(os.fstat(validation_fd), current_stat)
+                )
+            finally:
+                os.close(validation_fd)
+        except OSError:
+            return False
+
+    class LinkResolutionFailure(Exception):
+        def __init__(self, key, counts_as_error: bool):
+            super().__init__("link target could not be inspected safely")
+            self.key = key
+            self.counts_as_error = counts_as_error
+
+    def link_failure(path: str, counts_as_error: bool):
+        return LinkResolutionFailure(
+            ("link", os.path.normcase(os.path.normpath(path))),
+            counts_as_error,
+        )
+
+    def stable_readlink(parent_fd, name: str, expected_stat):
+        target = os.readlink(name, dir_fd=parent_fd)
+        current_stat = os.stat(
+            name, dir_fd=parent_fd, follow_symlinks=False
+        )
+        if not os.path.samestat(expected_stat, current_stat):
+            raise OSError("link changed during code scan")
+        return target
+
+    def start_link_target(link_target: str, parent_fd, parent_components):
+        if os.path.isabs(link_target):
+            normalized_target = os.path.normpath(link_target)
+            if not is_inside_root(normalized_target):
+                raise LinkResolutionFailure(
+                    ("outside", os.path.normcase(normalized_target)), False
+                )
+            if not root_path_matches_anchor():
+                raise link_failure(normalized_target, True)
+            relative_target = os.path.relpath(normalized_target, real_root)
+            return (
+                os.dup(root_fd), [], path_components(relative_target)
+            )
+
+        normalized_target = os.path.normpath(link_target)
+        target_parts = path_components(normalized_target)
+        if target_parts and target_parts[0] == os.pardir:
+            target_path = os.path.normpath(
+                os.path.join(
+                    canonical_path(parent_components), normalized_target
+                )
+            )
+            if not is_inside_root(target_path):
+                raise LinkResolutionFailure(
+                    ("outside", os.path.normcase(target_path)), False
+                )
+            # Resolving through a parent would detach from parent_fd if that
+            # directory were concurrently renamed. Conservatively fail closed.
+            raise link_failure(target_path, True)
+        return os.dup(parent_fd), list(parent_components), target_parts
+
+    def resolve_link(parent_fd, parent_components, name, link_stat):
+        """Resolve one link from its observed descriptor, confined to root."""
+        seen_links = {
+            link_identity(
+                link_stat, canonical_path((*parent_components, name))
+            )
+        }
+        link_hop_count = 0
+        try:
+            if link_hop_count >= MAX_SCAN_SYMLINK_HOPS:
+                raise link_failure(
+                    canonical_path((*parent_components, name)), True
+                )
+            link_hop_count += 1
+            link_target = stable_readlink(parent_fd, name, link_stat)
+            current_fd, resolved_parts, pending = start_link_target(
+                link_target, parent_fd, parent_components
+            )
+        except LinkResolutionFailure:
+            raise
+        except OSError:
+            raise link_failure(canonical_path((*parent_components, name)), True)
+
+        try:
+            try:
+                final_stat = os.fstat(current_fd)
+            except OSError:
+                raise link_failure(canonical_path(resolved_parts), True)
+            while pending:
+                component = pending.pop(0)
+                try:
+                    component_stat = os.stat(
+                        component, dir_fd=current_fd, follow_symlinks=False
+                    )
+                except OSError:
+                    raise link_failure(
+                        canonical_path((*resolved_parts, component)), True
+                    )
+
+                if stat.S_ISLNK(component_stat.st_mode):
+                    link_id = link_identity(
+                        component_stat,
+                        canonical_path((*resolved_parts, component)),
+                    )
+                    if link_id in seen_links:
+                        raise link_failure(
+                            canonical_path((*resolved_parts, component)), True
+                        )
+                    seen_links.add(link_id)
+                    try:
+                        if link_hop_count >= MAX_SCAN_SYMLINK_HOPS:
+                            raise link_failure(
+                                canonical_path((*resolved_parts, component)),
+                                True,
+                            )
+                        link_hop_count += 1
+                        nested_target = stable_readlink(
+                            current_fd, component, component_stat
+                        )
+                        next_fd, next_parts, target_parts = start_link_target(
+                            nested_target, current_fd, resolved_parts
+                        )
+                    except LinkResolutionFailure:
+                        raise
+                    except OSError:
+                        raise link_failure(
+                            canonical_path((*resolved_parts, component)), True
+                        )
+                    os.close(current_fd)
+                    current_fd = next_fd
+                    resolved_parts = next_parts
+                    pending = target_parts + pending
+                    try:
+                        final_stat = os.fstat(current_fd)
+                    except OSError:
+                        raise link_failure(canonical_path(resolved_parts), True)
+                    continue
+
+                target_parts = [*resolved_parts, component]
+                if pending or stat.S_ISDIR(component_stat.st_mode):
+                    if not stat.S_ISDIR(component_stat.st_mode):
+                        raise link_failure(canonical_path(target_parts), True)
+                    next_fd = None
+                    try:
+                        next_fd = os.open(
+                            component, directory_open_flags, dir_fd=current_fd
+                        )
+                        opened_stat = os.fstat(next_fd)
+                    except OSError:
+                        if next_fd is not None:
+                            os.close(next_fd)
+                        raise link_failure(canonical_path(target_parts), True)
+                    if not os.path.samestat(component_stat, opened_stat):
+                        os.close(next_fd)
+                        raise link_failure(canonical_path(target_parts), True)
+                    os.close(current_fd)
+                    current_fd = next_fd
+                    component_stat = opened_stat
+                resolved_parts = target_parts
+                final_stat = component_stat
+
+            return final_stat, resolved_parts
+        finally:
+            os.close(current_fd)
+
+    def record_link_failure(failure: LinkResolutionFailure) -> None:
+        if failure.counts_as_error:
+            record_error()
+        unresolved_symlink_targets.add(failure.key)
+
+    def unfollowed_symlink_count() -> int:
+        uncovered = symlink_target_identities - covered_directory_identities
+        return len(unresolved_symlink_targets) + len(uncovered)
+
+    root_identity = directory_identity(anchored_root_stat, real_root)
+    worklist = [([], root_identity)]
+    scheduled_directory_identities.add(root_identity)
+
+    try:
+        while worklist:
+            components, expected_identity = worklist.pop()
+            scheduled_directory_identities.discard(expected_identity)
+            if walked_directory_count >= MAX_SCAN_DIRECTORIES:
+                record_error()
+                break
+
+            try:
+                walk_fd, walk_stat = open_anchored_directory(
+                    components, expected_identity
+                )
+            except OSError:
+                record_error()
+                continue
+
+            walked_directory_count += 1
+            directory_candidates = []
+            candidate_identities = set()
+            file_names = []
+            symlink_entries = []
+            stop_traversal = False
+            try:
+                try:
+                    with os.scandir(walk_fd) as iterator:
+                        while True:
+                            try:
+                                entry = next(iterator)
+                            except StopIteration:
+                                break
+                            except OSError:
+                                record_error()
+                                break
+
+                            # One lookahead distinguishes an exactly-full scan
+                            # from a directory with uninspected entries.
+                            if listed_entry_count >= MAX_SCAN_ENTRIES:
+                                record_error()
+                                stop_traversal = True
+                                break
+                            listed_entry_count += 1
+
+                            try:
+                                entry_stat = os.stat(
+                                    entry.name,
+                                    dir_fd=walk_fd,
+                                    follow_symlinks=False,
+                                )
+                            except OSError:
+                                record_error()
+                                continue
+
+                            name = entry.name
+                            if name.startswith(".") or name in SKIP_DIRECTORY_NAMES:
+                                continue
+                            if stat.S_ISLNK(entry_stat.st_mode):
+                                symlink_entries.append((name, entry_stat))
+                                continue
+                            if stat.S_ISDIR(entry_stat.st_mode):
+                                child_parts = [*components, name]
+                                child_identity = directory_identity(
+                                    entry_stat, canonical_path(child_parts)
+                                )
+                                if (
+                                    child_identity in covered_directory_identities
+                                    or child_identity in scheduled_directory_identities
+                                    or child_identity in candidate_identities
+                                ):
+                                    continue
+                                if len(components) >= MAX_SCAN_DEPTH:
+                                    record_error()
+                                    break
+                                if (
+                                    walked_directory_count
+                                    + len(scheduled_directory_identities)
+                                    + len(candidate_identities)
+                                    >= MAX_SCAN_DIRECTORIES
+                                ):
+                                    record_error()
+                                    break
+                                candidate_identities.add(child_identity)
+                                directory_candidates.append(
+                                    (child_parts, child_identity)
+                                )
+                                continue
+                            if (
+                                scanned_file_count + len(file_names)
+                                >= MAX_SCAN_FILES
+                            ):
+                                record_error()
+                                stop_traversal = True
+                                break
+                            file_names.append(name)
+                except (OSError, RecursionError):
+                    record_error()
+
+                # Discard observations if this descriptor no longer matches
+                # the ordinary root-relative path that scheduled it.
+                if not descriptor_matches_anchored_path(
+                    walk_fd, walk_stat, components, expected_identity
+                ):
+                    record_error()
+                    if stop_traversal:
+                        break
+                    continue
+
+                for name, entry_stat in symlink_entries:
+                    try:
+                        target_stat, target_parts = resolve_link(
+                            walk_fd, components, name, entry_stat
+                        )
+                    except LinkResolutionFailure as failure:
+                        record_link_failure(failure)
+                        continue
+                    if stat.S_ISDIR(target_stat.st_mode):
+                        symlink_target_identities.add(
+                            directory_identity(
+                                target_stat, canonical_path(target_parts)
+                            )
+                        )
+                    else:
+                        if (
+                            scanned_file_count + len(file_names)
+                            >= MAX_SCAN_FILES
+                        ):
+                            record_error()
+                            stop_traversal = True
+                            break
+                        file_names.append(name)
+
+                if not descriptor_matches_anchored_path(
+                    walk_fd, walk_stat, components, expected_identity
+                ):
+                    record_error()
+                    if stop_traversal:
+                        break
+                    continue
+
+                if components and VIRTUALENV_MARKER in file_names:
+                    if stop_traversal:
+                        break
+                    continue
+
+                covered_directory_identities.add(expected_identity)
+                scanned_file_count += len(file_names)
+
+                if any(
+                    fnmatch.fnmatchcase(filename, pattern)
+                    for filename in file_names
+                    for pattern in patterns
+                ):
+                    # Revalidate before trusting a positive observation from
+                    # a directory that may have been concurrently replaced.
+                    if not descriptor_matches_anchored_path(
+                        walk_fd, walk_stat, components, expected_identity
+                    ):
+                        record_error()
+                    else:
+                        logger.debug("Code scan result: CODE_PRESENT")
+                        return CodeScanResult(
+                            directory,
+                            CodeApplicability.CODE_PRESENT,
+                            error_count,
+                            unfollowed_symlink_count(),
+                        )
+                if stop_traversal:
+                    break
+
+                for child_parts, child_identity in directory_candidates:
+                    scheduled_directory_identities.add(child_identity)
+                    worklist.append((child_parts, child_identity))
+            finally:
+                os.close(walk_fd)
+    finally:
+        os.close(root_fd)
+
+    if scheduled_directory_identities:
+        record_error()
+
+    if not root_path_matches_anchor():
+        record_error()
+
+    unfollowed_symlinks = unfollowed_symlink_count()
     applicability = (
-        CodeApplicability.NO_CODE if not errors and not unfollowed_symlinks
+        CodeApplicability.NO_CODE
+        if not error_count and not unfollowed_symlinks
         else CodeApplicability.UNKNOWN_PARTIAL
     )
     logger.debug(
-        f"Code scan result: {applicability.value} ({len(errors)} error(s), "
+        f"Code scan result: {applicability.value} ({error_count} error(s), "
         f"{unfollowed_symlinks} unfollowed directory symlink(s))"
     )
-    return CodeScanResult(directory, applicability, len(errors), unfollowed_symlinks)
+    return CodeScanResult(
+        directory, applicability, error_count, unfollowed_symlinks
+    )
 
 
 def has_code_files(directory: str = ".", file_patterns: Optional[List[str]] = None) -> bool:

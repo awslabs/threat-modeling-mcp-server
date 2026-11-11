@@ -2,6 +2,8 @@
 
 import pytest
 
+from threat_modeling_mcp_server.tools.threat_model_plan import SKIP_DIRECTORY_NAMES
+
 
 class _Ctx:
     """Minimal MCP context stub."""
@@ -578,6 +580,112 @@ class TestCodeScanner:
 
         assert scan_for_code(str(tmp_path)).applicability is CodeApplicability.NO_CODE
 
+    @pytest.mark.parametrize("name", sorted(SKIP_DIRECTORY_NAMES))
+    def test_file_named_like_skipped_directory_is_scanned(self, tmp_path, name):
+        from threat_modeling_mcp_server.tools.threat_model_plan import (
+            CodeApplicability, scan_for_code,
+        )
+
+        # Hidden files stay skipped, as in the os.walk scanner they replace.
+        expected = (
+            CodeApplicability.NO_CODE if name.startswith(".")
+            else CodeApplicability.CODE_PRESENT
+        )
+        file_root = tmp_path / "file"
+        file_root.mkdir()
+        (file_root / name).write_text("x = 1\n")
+        assert (
+            scan_for_code(str(file_root), file_patterns=[name]).applicability
+            is expected
+        )
+
+        # The directory form of the same name stays pruned.
+        dir_root = tmp_path / "dir"
+        dir_root.mkdir()
+        (dir_root / name).mkdir()
+        (dir_root / name / name).write_text("x = 1\n")
+        assert (
+            scan_for_code(str(dir_root), file_patterns=[name]).applicability
+            is CodeApplicability.NO_CODE
+        )
+
+    @pytest.mark.parametrize("name", sorted(SKIP_DIRECTORY_NAMES))
+    def test_symlink_named_like_skipped_directory(self, tmp_path, name):
+        from threat_modeling_mcp_server.tools.threat_model_plan import (
+            CodeApplicability, scan_for_code,
+        )
+
+        # A same-named link to a file is a file, as in a plain directory walk;
+        # hidden names stay skipped.
+        expected = (
+            CodeApplicability.NO_CODE if name.startswith(".")
+            else CodeApplicability.CODE_PRESENT
+        )
+        file_root = tmp_path / "file"
+        file_root.mkdir()
+        (file_root / ".target").write_text("x = 1\n")
+        (file_root / name).symlink_to(file_root / ".target")
+        assert (
+            scan_for_code(str(file_root), file_patterns=[name]).applicability
+            is expected
+        )
+
+        # A same-named directory alias stays pruned.
+        dir_root = tmp_path / "dir"
+        (dir_root / ".hidden").mkdir(parents=True)
+        (dir_root / ".hidden" / "app.py").write_text("x = 1\n")
+        (dir_root / name).symlink_to(
+            dir_root / ".hidden", target_is_directory=True
+        )
+        assert (
+            scan_for_code(str(dir_root)).applicability
+            is CodeApplicability.NO_CODE
+        )
+
+    @pytest.mark.parametrize("name", ["build", "target", "node_modules"])
+    @pytest.mark.parametrize("link_form", ["parent_relative", "outside_root", "dangling"])
+    def test_unresolvable_skip_named_file_link_is_scanned(
+        self, tmp_path, name, link_form,
+    ):
+        import os
+        from threat_modeling_mcp_server.tools.threat_model_plan import (
+            CodeApplicability, scan_for_code,
+        )
+
+        # Links the scanner declines to resolve are still matched by name
+        # unless they point at a directory, as in a plain directory walk.
+        root = tmp_path / "root"
+        (root / "sub").mkdir(parents=True)
+        if link_form == "parent_relative":
+            (root / "real").write_text("x = 1\n")
+            os.symlink(os.path.join("..", "real"), root / "sub" / name)
+        elif link_form == "outside_root":
+            (tmp_path / "outside").write_text("x = 1\n")
+            (root / "sub" / name).symlink_to(tmp_path / "outside")
+        else:
+            (root / "sub" / name).symlink_to(root / "missing")
+        assert (
+            scan_for_code(str(root), file_patterns=[name]).applicability
+            is CodeApplicability.CODE_PRESENT
+        )
+
+    @pytest.mark.parametrize("name", ["build", "target", "node_modules"])
+    def test_outside_root_skip_named_directory_link_is_pruned(self, tmp_path, name):
+        from threat_modeling_mcp_server.tools.threat_model_plan import (
+            CodeApplicability, scan_for_code,
+        )
+
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "app.py").write_text("x = 1\n")
+        root = tmp_path / "root"
+        root.mkdir()
+        (root / name).symlink_to(outside, target_is_directory=True)
+        assert (
+            scan_for_code(str(root)).applicability
+            is CodeApplicability.NO_CODE
+        )
+
     def test_source_file_is_code(self, tmp_path):
         from threat_modeling_mcp_server.tools.threat_model_plan import (
             CodeApplicability, scan_for_code,
@@ -613,22 +721,32 @@ class TestCodeScanner:
             is CodeApplicability.NO_CODE
         )
 
-    @pytest.mark.parametrize("name", ["build", "env"])
-    def test_source_under_common_source_directory_names_is_code(
-        self, tmp_path, name,
-    ):
-        """build/ and env/ often hold real source, so they are scanned."""
+    def test_source_under_env_directory_is_code(self, tmp_path):
+        """env/ can hold real source when it is not a virtual environment."""
         from threat_modeling_mcp_server.tools.threat_model_plan import (
             CodeApplicability, scan_for_code,
         )
 
-        (tmp_path / name / "prod").mkdir(parents=True)
-        (tmp_path / name / "prod" / "main.tf").write_text("terraform {}\n")
+        (tmp_path / "env" / "prod").mkdir(parents=True)
+        (tmp_path / "env" / "prod" / "main.tf").write_text("terraform {}\n")
         (tmp_path / "README.md").write_text("docs")
 
         assert (
             scan_for_code(str(tmp_path)).applicability
             is CodeApplicability.CODE_PRESENT
+        )
+
+    def test_source_under_build_directory_is_pruned(self, tmp_path):
+        from threat_modeling_mcp_server.tools.threat_model_plan import (
+            CodeApplicability, scan_for_code,
+        )
+
+        (tmp_path / "build" / "prod").mkdir(parents=True)
+        (tmp_path / "build" / "prod" / "main.tf").write_text("terraform {}\n")
+
+        assert (
+            scan_for_code(str(tmp_path)).applicability
+            is CodeApplicability.NO_CODE
         )
 
     @pytest.mark.parametrize("name", ["env", "py310-env"])
@@ -683,6 +801,147 @@ class TestCodeScanner:
         assert result.applicability is CodeApplicability.NO_CODE
         assert result.unfollowed_symlink_count == 0
 
+    def test_visible_symlink_to_hidden_source_fails_closed(self, tmp_path):
+        from threat_modeling_mcp_server.tools.threat_model_plan import (
+            CodeApplicability, has_code_files, scan_for_code,
+        )
+
+        hidden_source = tmp_path / ".hidden" / "source"
+        hidden_source.mkdir(parents=True)
+        (hidden_source / "application.py").write_text("x = 1\n")
+        (tmp_path / "visible-source").symlink_to(
+            hidden_source, target_is_directory=True,
+        )
+
+        result = scan_for_code(str(tmp_path))
+
+        assert result.applicability is CodeApplicability.UNKNOWN_PARTIAL
+        assert result.unfollowed_symlink_count == 1
+        assert has_code_files(str(tmp_path)) is True
+
+    def test_duplicate_links_to_pruned_target_are_deduplicated(self, tmp_path):
+        from threat_modeling_mcp_server.tools.threat_model_plan import (
+            CodeApplicability, scan_for_code,
+        )
+
+        hidden_source = tmp_path / ".hidden" / "source"
+        hidden_source.mkdir(parents=True)
+        (hidden_source / "notes.txt").write_text("x")
+        (tmp_path / "first").symlink_to(hidden_source, target_is_directory=True)
+        (tmp_path / "second").symlink_to(hidden_source, target_is_directory=True)
+
+        result = scan_for_code(str(tmp_path))
+
+        assert result.applicability is CodeApplicability.UNKNOWN_PARTIAL
+        assert result.unfollowed_symlink_count == 1
+
+    def test_broken_visible_symlink_fails_closed(self, tmp_path):
+        from threat_modeling_mcp_server.tools.threat_model_plan import (
+            CodeApplicability, has_code_files, scan_for_code,
+        )
+
+        (tmp_path / "broken").symlink_to(
+            tmp_path / "missing", target_is_directory=True,
+        )
+
+        result = scan_for_code(str(tmp_path))
+
+        assert result.applicability is CodeApplicability.UNKNOWN_PARTIAL
+        assert result.error_count == 1
+        assert result.unfollowed_symlink_count == 1
+        assert has_code_files(str(tmp_path)) is True
+
+    def test_symlink_cycle_fails_closed(self, tmp_path):
+        from threat_modeling_mcp_server.tools.threat_model_plan import (
+            CodeApplicability, scan_for_code,
+        )
+
+        (tmp_path / "first").symlink_to(
+            tmp_path / "second", target_is_directory=True,
+        )
+        (tmp_path / "second").symlink_to(
+            tmp_path / "first", target_is_directory=True,
+        )
+
+        result = scan_for_code(str(tmp_path))
+
+        assert result.applicability is CodeApplicability.UNKNOWN_PARTIAL
+        assert result.error_count > 0
+        assert result.unfollowed_symlink_count > 0
+
+    def test_symlink_hop_limit_stops_resolution(
+        self, tmp_path, monkeypatch,
+    ):
+        import threat_modeling_mcp_server.tools.threat_model_plan as plan
+
+        (tmp_path / "docs").mkdir()
+        (tmp_path / ".second").symlink_to(
+            "docs", target_is_directory=True,
+        )
+        (tmp_path / ".first").symlink_to(
+            ".second", target_is_directory=True,
+        )
+        (tmp_path / "visible").symlink_to(
+            ".first", target_is_directory=True,
+        )
+        real_readlink = plan.os.readlink
+        read_links = []
+
+        def counting_readlink(path, *, dir_fd=None):
+            read_links.append(path)
+            return real_readlink(path, dir_fd=dir_fd)
+
+        monkeypatch.setattr(plan, "MAX_SCAN_SYMLINK_HOPS", 1)
+        monkeypatch.setattr(plan.os, "readlink", counting_readlink)
+
+        result = plan.scan_for_code(str(tmp_path))
+
+        assert result.applicability is plan.CodeApplicability.UNKNOWN_PARTIAL
+        assert result.error_count > 0
+        assert read_links == ["visible"]
+
+    @pytest.mark.parametrize("fail_after_readlinks", [1, 2])
+    def test_symlink_descriptor_stat_error_fails_closed(
+        self, tmp_path, monkeypatch, fail_after_readlinks,
+    ):
+        import threat_modeling_mcp_server.tools.threat_model_plan as plan
+
+        hidden_target = tmp_path / ".target"
+        hidden_target.mkdir()
+        (hidden_target / "notes.txt").write_text("x")
+        (tmp_path / ".nested").symlink_to(
+            ".target", target_is_directory=True,
+        )
+        (tmp_path / "visible").symlink_to(
+            ".nested", target_is_directory=True,
+        )
+        real_readlink = plan.os.readlink
+        real_fstat = plan.os.fstat
+        readlink_count = 0
+        failed = False
+
+        def counting_readlink(path, *, dir_fd=None):
+            nonlocal readlink_count
+            readlink_count += 1
+            return real_readlink(path, dir_fd=dir_fd)
+
+        def failing_fstat(fd):
+            nonlocal failed
+            if readlink_count == fail_after_readlinks and not failed:
+                failed = True
+                raise PermissionError("descriptor metadata denied")
+            return real_fstat(fd)
+
+        monkeypatch.setattr(plan.os, "readlink", counting_readlink)
+        monkeypatch.setattr(plan.os, "fstat", failing_fstat)
+
+        result = plan.scan_for_code(str(tmp_path))
+
+        assert failed is True
+        assert result.applicability is plan.CodeApplicability.UNKNOWN_PARTIAL
+        assert result.error_count == 1
+        assert result.unfollowed_symlink_count == 1
+
     def test_symlinked_skip_directory_is_pruned_without_counting(self, tmp_path):
         from threat_modeling_mcp_server.tools.threat_model_plan import (
             CodeApplicability, scan_for_code,
@@ -729,19 +988,231 @@ class TestCodeScanner:
         )
         assert has_code_files(missing) is True
 
+    def test_malformed_root_is_unknown(self, tmp_path):
+        from threat_modeling_mcp_server.tools.threat_model_plan import (
+            CodeApplicability, has_code_files, scan_for_code,
+        )
+
+        malformed = f"{tmp_path}{chr(0)}invalid"
+        result = scan_for_code(malformed)
+
+        assert result.applicability is CodeApplicability.UNKNOWN_PARTIAL
+        assert result.error_count == 1
+        assert has_code_files(malformed) is True
+
     def test_walk_errors_fail_closed(self, tmp_path, monkeypatch):
         import threat_modeling_mcp_server.tools.threat_model_plan as plan
 
-        def failing_walk(top, topdown=True, onerror=None, followlinks=False):
-            onerror(PermissionError("denied"))
-            return iter(())
+        def failing_scandir(_path):
+            raise PermissionError("denied")
 
-        monkeypatch.setattr(plan.os, "walk", failing_walk)
+        monkeypatch.setattr(plan.os, "scandir", failing_scandir)
 
         result = plan.scan_for_code(str(tmp_path))
         assert result.applicability is plan.CodeApplicability.UNKNOWN_PARTIAL
         assert result.error_count == 1
         assert plan.has_code_files(str(tmp_path)) is True
+
+    def test_walk_recursion_error_fails_closed(self, tmp_path, monkeypatch):
+        import threat_modeling_mcp_server.tools.threat_model_plan as plan
+
+        def recursive_scandir(_path):
+            raise RecursionError("tree is too deep")
+
+        monkeypatch.setattr(plan.os, "scandir", recursive_scandir)
+
+        result = plan.scan_for_code(str(tmp_path))
+        assert result.applicability is plan.CodeApplicability.UNKNOWN_PARTIAL
+        assert result.error_count == 1
+
+    def test_entry_classification_error_fails_closed(
+        self, tmp_path, monkeypatch,
+    ):
+        import threat_modeling_mcp_server.tools.threat_model_plan as plan
+
+        (tmp_path / "docs").mkdir()
+        real_stat = plan.os.stat
+
+        def failing_stat(path, *args, **kwargs):
+            if (
+                path == "docs"
+                and kwargs.get("dir_fd") is not None
+                and kwargs.get("follow_symlinks") is False
+            ):
+                raise PermissionError("classification denied")
+            return real_stat(path, *args, **kwargs)
+
+        monkeypatch.setattr(plan.os, "stat", failing_stat)
+
+        result = plan.scan_for_code(str(tmp_path))
+        assert result.applicability is plan.CodeApplicability.UNKNOWN_PARTIAL
+        assert result.error_count == 1
+
+    def test_replaced_root_link_resolution_fails_closed(
+        self, tmp_path, monkeypatch,
+    ):
+        import threat_modeling_mcp_server.tools.threat_model_plan as plan
+
+        project = tmp_path / "project"
+        hidden_source = project / ".hidden" / "source"
+        hidden_source.mkdir(parents=True)
+        (hidden_source / "application.py").write_text("x = 1\n")
+        (project / "docs").mkdir()
+        (project / "docs" / "notes.txt").write_text("x")
+        (project / "visible-source").symlink_to(
+            ".hidden/source", target_is_directory=True,
+        )
+        moved_project = tmp_path / "moved-project"
+        real_readlink = plan.os.readlink
+        replaced = False
+
+        def replacing_readlink(path, *, dir_fd=None):
+            nonlocal replaced
+            if path == "visible-source" and not replaced:
+                replaced = True
+                project.rename(moved_project)
+                (project / "docs").mkdir(parents=True)
+                (project / "visible-source").symlink_to(
+                    "docs", target_is_directory=True,
+                )
+            return real_readlink(path, dir_fd=dir_fd)
+
+        monkeypatch.setattr(plan.os, "readlink", replacing_readlink)
+
+        result = plan.scan_for_code(str(project))
+
+        assert replaced is True
+        assert (moved_project / ".hidden/source/application.py").is_file()
+        assert result.applicability is plan.CodeApplicability.UNKNOWN_PARTIAL
+        assert result.applicability is not plan.CodeApplicability.NO_CODE
+
+    def test_replaced_child_never_enumerates_outside_root(
+        self, tmp_path, monkeypatch,
+    ):
+        import threat_modeling_mcp_server.tools.threat_model_plan as plan
+
+        project = tmp_path / "project"
+        child = project / "child"
+        child.mkdir(parents=True)
+        (child / "notes.txt").write_text("x")
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "application.py").write_text("x = 1\n")
+        outside_stat = outside.stat()
+
+        real_open = plan.os.open
+        real_scandir = plan.os.scandir
+        replaced = False
+        enumerated_outside = False
+
+        def replacing_open(path, flags, *args, **kwargs):
+            nonlocal replaced
+            if (
+                path == "child"
+                and kwargs.get("dir_fd") is not None
+                and not replaced
+            ):
+                replaced = True
+                child.rename(project / "original-child")
+                child.symlink_to(outside, target_is_directory=True)
+            return real_open(path, flags, *args, **kwargs)
+
+        def observing_scandir(path):
+            nonlocal enumerated_outside
+            if isinstance(path, int) and plan.os.path.samestat(
+                plan.os.fstat(path), outside_stat
+            ):
+                enumerated_outside = True
+            return real_scandir(path)
+
+        monkeypatch.setattr(plan.os, "open", replacing_open)
+        monkeypatch.setattr(plan.os, "scandir", observing_scandir)
+
+        result = plan.scan_for_code(str(project))
+
+        assert replaced is True
+        assert result.applicability is plan.CodeApplicability.UNKNOWN_PARTIAL
+        assert result.error_count > 0
+        assert enumerated_outside is False
+
+    @pytest.mark.parametrize(
+        "limit_name",
+        [
+            "MAX_SCAN_DEPTH",
+            "MAX_SCAN_DIRECTORIES",
+            "MAX_SCAN_FILES",
+            "MAX_SCAN_ENTRIES",
+        ],
+    )
+    def test_scan_bounds_fail_closed(self, tmp_path, monkeypatch, limit_name):
+        import threat_modeling_mcp_server.tools.threat_model_plan as plan
+
+        (tmp_path / "docs" / "nested").mkdir(parents=True)
+        (tmp_path / "docs" / "notes.txt").write_text("x")
+        monkeypatch.setattr(plan, limit_name, 0)
+
+        result = plan.scan_for_code(str(tmp_path))
+
+        assert result.applicability is plan.CodeApplicability.UNKNOWN_PARTIAL
+        assert result.error_count > 0
+
+    @pytest.mark.parametrize(
+        "limit_name, limit_value, entry_kind, expected_entries",
+        [
+            ("MAX_SCAN_DEPTH", 0, "directory", 1),
+            ("MAX_SCAN_DIRECTORIES", 1, "directory", 1),
+            ("MAX_SCAN_FILES", 1, "file", 2),
+            ("MAX_SCAN_ENTRIES", 1, "file", 2),
+        ],
+    )
+    def test_scan_bounds_stop_directory_enumeration(
+        self,
+        tmp_path,
+        monkeypatch,
+        limit_name,
+        limit_value,
+        entry_kind,
+        expected_entries,
+    ):
+        import threat_modeling_mcp_server.tools.threat_model_plan as plan
+
+        for index in range(10):
+            entry = tmp_path / f"entry-{index}"
+            if entry_kind == "directory":
+                entry.mkdir()
+            else:
+                entry.write_text("notes")
+
+        real_scandir = plan.os.scandir
+        yielded_entries = 0
+
+        class CountingIterator:
+            def __init__(self, iterator):
+                self.iterator = iterator
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                self.iterator.close()
+
+            def __next__(self):
+                nonlocal yielded_entries
+                entry = next(self.iterator)
+                yielded_entries += 1
+                return entry
+
+        def counting_scandir(path):
+            return CountingIterator(real_scandir(path))
+
+        monkeypatch.setattr(plan, limit_name, limit_value)
+        monkeypatch.setattr(plan.os, "scandir", counting_scandir)
+
+        result = plan.scan_for_code(str(tmp_path))
+
+        assert result.applicability is plan.CodeApplicability.UNKNOWN_PARTIAL
+        assert result.error_count > 0
+        assert yielded_entries == expected_entries
 
     def test_single_walk_short_circuits_on_first_match(self, tmp_path, monkeypatch):
         import threat_modeling_mcp_server.tools.threat_model_plan as plan
@@ -751,41 +1222,41 @@ class TestCodeScanner:
             (tmp_path / f"d{index}" / "notes.txt").write_text("x")
         (tmp_path / "app.py").write_text("x = 1\n")
 
-        real_walk = plan.os.walk
-        calls = {"walks": 0, "yields": 0}
+        real_scandir = plan.os.scandir
+        calls = 0
 
-        def counting_walk(*args, **kwargs):
-            calls["walks"] += 1
-            for entry in real_walk(*args, **kwargs):
-                calls["yields"] += 1
-                yield entry
+        def counting_scandir(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            return real_scandir(*args, **kwargs)
 
-        monkeypatch.setattr(plan.os, "walk", counting_walk)
+        monkeypatch.setattr(plan.os, "scandir", counting_scandir)
 
         assert plan.scan_for_code(str(tmp_path)).applicability is (
             plan.CodeApplicability.CODE_PRESENT
         )
         # The root holds the match, so no subdirectory is visited.
-        assert calls == {"walks": 1, "yields": 1}
+        assert calls == 1
 
-    def test_no_match_scan_walks_tree_once(self, tmp_path, monkeypatch):
+    def test_no_match_scan_visits_each_directory_once(self, tmp_path, monkeypatch):
         import threat_modeling_mcp_server.tools.threat_model_plan as plan
 
         (tmp_path / "docs").mkdir()
         (tmp_path / "docs" / "notes.txt").write_text("x")
-        real_walk = plan.os.walk
-        calls = {"walks": 0}
+        real_scandir = plan.os.scandir
+        visited = []
 
-        def counting_walk(*args, **kwargs):
-            calls["walks"] += 1
-            return real_walk(*args, **kwargs)
+        def counting_scandir(path):
+            visited.append((plan.os.fstat(path).st_dev, plan.os.fstat(path).st_ino))
+            return real_scandir(path)
 
-        monkeypatch.setattr(plan.os, "walk", counting_walk)
+        monkeypatch.setattr(plan.os, "scandir", counting_scandir)
 
         assert plan.scan_for_code(str(tmp_path)).applicability is (
             plan.CodeApplicability.NO_CODE
         )
-        assert calls["walks"] == 1
+        assert len(visited) == 2
+        assert len(set(visited)) == len(visited)
 
     @pytest.mark.asyncio
     async def test_detection_does_not_block_event_loop(self, tmp_path, monkeypatch):
